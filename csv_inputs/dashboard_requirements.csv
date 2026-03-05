@@ -1,25 +1,25 @@
 view_id,view_name,view_type,chart_type,rows,columns,color,size,label,filter_fields,sort_by,sort_direction,dashboard_id,dashboard_layout,views_in_dashboard,width_px,height_px,notes
-kpi_sales,KPI Sales,worksheet,Line,MONTH(Order Date),SUM(Sales),,,,,,,,,,,,KPI card - combo bar/line with prior year reference line. Left panel.
-kpi_profit,KPI Profit,worksheet,Line,MONTH(Order Date),SUM(Profit),,,,,,,,,,,,KPI card - combo bar/line with prior year reference line. Left panel.
-kpi_orders,KPI Orders,worksheet,Line,MONTH(Order Date),# Orders,,,,,,,,,,,,KPI card - combo bar/line. Left panel.
-kpi_customers,KPI Customers,worksheet,Line,MONTH(Order Date),# Customers,,,,,,,,,,,,KPI card - combo bar/line. Left panel.
-sales_by_state,Sales by State,worksheet,Map,,State/Province,SUM(Sales),SUM(Sales),SUM(Sales),,,,,,,,,,Filled map - circle size = Sales. Home dashboard.
-sales_by_region,Sales by Region,worksheet,Bar,Region,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Vertical bar chart sorted descending. Home dashboard.
-sales_by_segment,Sales by Segment,worksheet,Bar,Segment,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Vertical bar chart. Home dashboard.
-sales_by_category,Sales by Category,worksheet,Bar,Category,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Horizontal bar chart. Home and Product dashboards.
-top10_subcategory,Sales by Top 10 Sub-Category,worksheet,Bar,Sub-Category,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Horizontal bar - top 10 sub-categories. Home dashboard.
-sales_by_prod_category,Sales by Product Category,worksheet,Bar,Category,SUM(Sales),SUM(Sales),SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Horizontal bar with CY vs PY bars + sparkline. Product Analysis.
-top18_products,Top 18 Products,worksheet,Bar,Product Name,SUM(Sales),Is Profitable,,SUM(Sales),,SUM(Sales),desc,,,,,,Horizontal bar colored by profitability. Product Analysis.
-profit_ratio_top24,Profit Ratio - Top 24 Products,worksheet,Text,Product Name,Profit Ratio|# Orders|SUM(Sales)|SUM(Profit),,,,SUM(Sales),desc,,,,,,Text table with 5 columns. Product Analysis.
-sales_by_region_monthly,Sales by Regions Monthly,worksheet,Bar,Region|MONTH(Order Date),SUM(Sales),,SUM(Sales),,,,,,,,,,,Small multiples bar by region and month. Location Analysis.
-kpis_by_state,KPIs by State,worksheet,Text,State/Province,# Orders|SUM(Sales)|SUM(Profit)|Profit Ratio,Is Profitable,,,,SUM(Sales),desc,,,,,,Text table with state rows and KPI columns. Location Analysis.
-order_trend,Order Trend,worksheet,Area,MONTH(Order Date),# Orders,,,,,,,,,,,,Full-width area chart 2020-2023. Order Details.
-order_details_table,Order Details Table,worksheet,Text,Order ID|Customer Name|City|State/Province|Segment|Days to Ship|Quantity|SUM(Sales)|SUM(Profit)|Profit Ratio,,,,,,Order Date,asc,,,,,,Scrollable order-level detail table. Order Details.
-sales_by_cust_segment,Sales by Customer Segment,worksheet,Bar,Segment,SUM(Sales),SUM(Sales),SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Horizontal bar + sparkline per segment. Customer Analysis.
-top15_customers,Top 15 Customers,worksheet,Bar,Customer Name,SUM(Sales),Is Profitable,,SUM(Sales),,SUM(Sales),desc,,,,,,Horizontal bar colored by profitability. Customer Analysis.
-new_repeat_trend,Trend - New vs Repeat Customer,worksheet,Line,MONTH(Order Date),# Customers,Customer Type,,,,,,,,,,,Line chart showing new vs repeat customer trend. Customer Analysis.
-dash_home,Home,dashboard,,,,,,,,,,dash_home,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_state|sales_by_region|sales_by_segment|sales_by_category|top10_subcategory,,1280,900,Executive summary dashboard - light mode design
-dash_product,Product Analysis,dashboard,,,,,,,,,,dash_product,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_prod_category|top18_products|profit_ratio_top24,,1280,900,Product performance dashboard - dark mode design
-dash_location,Location Analysis,dashboard,,,,,,,,,,dash_location,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_region_monthly|kpis_by_state,,1280,900,Geographic performance dashboard - dark mode design
-dash_orders,Order Details,dashboard,,,,,,,,,,dash_orders,vertical,order_trend|order_details_table,,1280,900,Transactional order detail dashboard - dark mode design
-dash_customers,Customer Analysis,dashboard,,,,,,,,,,dash_customers,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_cust_segment|top15_customers|new_repeat_trend,,1280,900,Customer segmentation dashboard - dark mode design
+kpi_sales,KPI Sales,worksheet,Line,MONTH(Order Date),SUM(Sales),,,,,,,,,,,,KPI Sales card
+kpi_profit,KPI Profit,worksheet,Line,MONTH(Order Date),SUM(Profit),,,,,,,,,,,,KPI Profit card
+kpi_orders,KPI Orders,worksheet,Line,MONTH(Order Date),# Orders,,,,,,,,,,,,KPI Orders card
+kpi_customers,KPI Customers,worksheet,Line,MONTH(Order Date),# Customers,,,,,,,,,,,,KPI Customers card
+sales_by_state,Sales by State,worksheet,Map,,State/Province,SUM(Sales),SUM(Sales),SUM(Sales),,,,,,,,,Filled map
+sales_by_region,Sales by Region,worksheet,Bar,Region,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Bar by region
+sales_by_segment,Sales by Segment,worksheet,Bar,Segment,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Bar by segment
+sales_by_category,Sales by Category,worksheet,Bar,Category,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Bar by category
+top10_subcategory,Sales by Top 10 Sub-Category,worksheet,Bar,Sub-Category,SUM(Sales),,SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Top 10 sub-categories
+sales_by_prod_category,Sales by Product Category,worksheet,Bar,Category,SUM(Sales),SUM(Sales),SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Category with sparkline
+top18_products,Top 18 Products,worksheet,Bar,Product Name,SUM(Sales),Is Profitable,,SUM(Sales),,SUM(Sales),desc,,,,,,Bar by profitability
+profit_ratio_top24,Profit Ratio - Top 24 Products,worksheet,Text,Product Name,Profit Ratio|# Orders|SUM(Sales)|SUM(Profit),,,,,SUM(Sales),desc,,,,,,Text table top 24
+sales_by_region_monthly,Sales by Regions Monthly,worksheet,Bar,Region|MONTH(Order Date),SUM(Sales),,SUM(Sales),,,,,,,,,,Small multiples
+kpis_by_state,KPIs by State,worksheet,Text,State/Province,# Orders|SUM(Sales)|SUM(Profit)|Profit Ratio,Is Profitable,,,,SUM(Sales),desc,,,,,,KPI table by state
+order_trend,Order Trend,worksheet,Area,MONTH(Order Date),# Orders,,,,,,,,,,,,Area chart 2020-2023
+order_details_table,Order Details Table,worksheet,Text,Order ID|Customer Name|City|State/Province|Segment|Days to Ship|Quantity|SUM(Sales)|SUM(Profit)|Profit Ratio,,,,,,Order Date,asc,,,,,,Order detail table
+sales_by_cust_segment,Sales by Customer Segment,worksheet,Bar,Segment,SUM(Sales),SUM(Sales),SUM(Sales),SUM(Sales),,SUM(Sales),desc,,,,,,Segment bars
+top15_customers,Top 15 Customers,worksheet,Bar,Customer Name,SUM(Sales),Is Profitable,,SUM(Sales),,SUM(Sales),desc,,,,,,Top 15 customers
+new_repeat_trend,Trend - New vs Repeat Customer,worksheet,Line,MONTH(Order Date),# Customers,Customer Type,,,,,,,,,,,New vs repeat trend
+dash_home,Home,dashboard,,,,,,,,,,dash_home,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_state|sales_by_region|sales_by_segment|sales_by_category|top10_subcategory,1280,900,Home dashboard
+dash_product,Product Analysis,dashboard,,,,,,,,,,dash_product,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_prod_category|top18_products|profit_ratio_top24,1280,900,Product dashboard
+dash_location,Location Analysis,dashboard,,,,,,,,,,dash_location,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_region_monthly|kpis_by_state,1280,900,Location dashboard
+dash_orders,Order Details,dashboard,,,,,,,,,,dash_orders,vertical,order_trend|order_details_table,1280,900,Orders dashboard
+dash_customers,Customer Analysis,dashboard,,,,,,,,,,dash_customers,vertical,kpi_sales|kpi_profit|kpi_orders|kpi_customers|sales_by_cust_segment|top15_customers|new_repeat_trend,1280,900,Customer dashboard

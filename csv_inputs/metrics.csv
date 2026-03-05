@@ -1,11 +1,11 @@
 metric_id,metric_name,formula,datatype,format_string,description,is_lod
-met_001,Profit Ratio,SUM([Profit])/SUM([Sales]),real,#0.0%,Profit as a percentage of Sales,false
-met_002,Days to Ship,DATEDIFF('day',[Order Date],[Ship Date]),integer,#,Average days between order placed and shipped,false
-met_003,# Orders,COUNTD([Order ID]),integer,#,Count of distinct orders,false
-met_004,# Customers,COUNTD([Customer ID]),integer,#,Count of distinct customers,false
-met_005,Sales vs PY %,(SUM([Sales]) - LOOKUP(SUM([Sales]),-1)) / ABS(LOOKUP(SUM([Sales]),-1)),real,+#0.0%;-#0.0%,Year-over-year Sales growth percentage,false
-met_006,Profit vs PY %,(SUM([Profit]) - LOOKUP(SUM([Profit]),-1)) / ABS(LOOKUP(SUM([Profit]),-1)),real,+#0.0%;-#0.0%,Year-over-year Profit growth percentage,false
-met_007,Is Profitable,IF SUM([Profit]) > 0 THEN 'Profitable' ELSE 'Not Profitable' END,string,,Profitability flag for color encoding,false
-met_008,Customer Type,IF COUNTD([Order ID]) > 1 THEN 'Repeat Customer' ELSE 'New Customer' END,string,,Classifies customer as new or repeat,false
-met_009,Sales CY,{ FIXED YEAR([Order Date]) : SUM([Sales]) },real,"$#,##0.0K",Current year sales using LOD,true
-met_010,Profit CY,{ FIXED YEAR([Order Date]) : SUM([Profit]) },real,"$#,##0.0K",Current year profit using LOD,true
+met_001,Profit Ratio,SUM([Profit])/SUM([Sales]),real,#0.0%,Profit as % of Sales,false
+met_002,Days to Ship,"DATEDIFF('day',[Order Date],[Ship Date])",integer,#,Days between order and ship,false
+met_003,# Orders,COUNTD([Order ID]),integer,#,Distinct orders,false
+met_004,# Customers,COUNTD([Customer ID]),integer,#,Distinct customers,false
+met_005,Sales vs PY %,"(SUM([Sales])-LOOKUP(SUM([Sales]),-1))/ABS(LOOKUP(SUM([Sales]),-1))",real,+#0.0%;-#0.0%,YoY Sales growth,false
+met_006,Profit vs PY %,"(SUM([Profit])-LOOKUP(SUM([Profit]),-1))/ABS(LOOKUP(SUM([Profit]),-1))",real,+#0.0%;-#0.0%,YoY Profit growth,false
+met_007,Is Profitable,IF SUM([Profit]) > 0 THEN 'Profitable' ELSE 'Not Profitable' END,string,,Profitability flag,false
+met_008,Customer Type,IF COUNTD([Order ID]) > 1 THEN 'Repeat Customer' ELSE 'New Customer' END,string,,New or repeat customer,false
+met_009,Sales CY,{ FIXED YEAR([Order Date]) : SUM([Sales]) },real,"$#,##0.0K",Current year sales LOD,true
+met_010,Profit CY,{ FIXED YEAR([Order Date]) : SUM([Profit]) },real,"$#,##0.0K",Current year profit LOD,true
