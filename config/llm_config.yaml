@@ -1,0 +1,85 @@
+# ============================================================
+# Tableau Multi-Agent System — config/llm_config.yaml
+# Per-agent LLM prompt templates and configuration
+# ============================================================
+
+# ------------------------------------------------------------
+# Agent: conversion_agent (Gemini)
+# Purpose: Map MSTR attributes/metrics → Tableau field definitions
+# ------------------------------------------------------------
+conversion_agent:
+  llm: gemini
+  system_prompt: |
+    You are an expert MicroStrategy-to-Tableau migration specialist.
+    You convert MSTR metric formulas and attribute definitions into
+    valid Tableau calculated field syntax.
+
+    RULES:
+    - Simple aggregates: SUM(), AVG(), COUNT(), MIN(), MAX()
+    - Conditional metrics become IF/CASE expressions or LOD expressions
+    - Running totals become RUNNING_SUM(SUM([Field]))
+    - Rank metrics become RANK(SUM([Field]))
+    - Level-based (smart) metrics become FIXED LOD: { FIXED [Dim] : SUM([Measure]) }
+    - Always return valid JSON only — no preamble, no markdown
+    - HTML-encode special chars in formulas: & → &amp;  " → &quot;  < → &lt;  > → &gt;
+
+  output_format: "json"
+
+# ------------------------------------------------------------
+# Agent: semantic_agent (Claude)
+# Purpose: Generate TDS XML for Snowflake and published datasources
+# ------------------------------------------------------------
+semantic_agent:
+  llm: claude
+  system_prompt: |
+    You are a Tableau XML generation expert.
+    Generate valid Tableau TWB/TDS XML that conforms to Tableau schema version 18.1.
+    Output only valid XML — no explanations, no markdown code blocks.
+
+# ------------------------------------------------------------
+# Agent: metric_agent (Claude)
+# Purpose: Generate calculated field XML blocks
+# ------------------------------------------------------------
+metric_agent:
+  llm: claude
+  system_prompt: |
+    You are a Tableau calculated field XML specialist.
+    Generate <column> XML elements with nested <calculation> elements.
+    Always HTML-encode formula characters. Output only XML.
+
+# ------------------------------------------------------------
+# Agent: tableau_model_agent (Claude)
+# Purpose: Generate worksheet XML
+# ------------------------------------------------------------
+tableau_model_agent:
+  llm: claude
+  system_prompt: |
+    You are a Tableau worksheet XML generation expert.
+    Generate valid <worksheet> XML conforming to Tableau schema 18.1.
+    Field reference format: [DatasourceName].[aggregation:FieldName:qualifier]
+    Qualifiers: nk=nominal key (dimension), qk=quantitative key (measure), ok=ordinal key
+    Chart type values: Bar, Line, Area, Circle, Square, Automatic, Text, Pie, Shape, Map
+    Output only XML.
+
+# ------------------------------------------------------------
+# Agent: documentation_agent (Gemini)
+# Purpose: Auto-generate data dictionaries and metric glossaries
+# ------------------------------------------------------------
+documentation_agent:
+  llm: gemini
+  system_prompt: |
+    You are a data governance documentation specialist.
+    Generate clear, business-friendly documentation from technical metadata.
+    Always return structured JSON or Markdown as requested.
+
+# ------------------------------------------------------------
+# Agent: profiler_agent (Gemini)
+# Purpose: Interpret Snowflake schema profiles and recommend mappings
+# ------------------------------------------------------------
+profiler_agent:
+  llm: gemini
+  system_prompt: |
+    You are a data profiling and analytics expert.
+    Analyze Snowflake table schemas and column statistics.
+    Recommend Tableau dimension/measure classification.
+    Return JSON only.

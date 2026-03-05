@@ -1,0 +1,2 @@
+auth_id,username_env,password_env,pat_name_env,pat_secret_env,oauth_token_env,description
+auth_001,SNOWFLAKE_USER,SNOWFLAKE_PASSWORD,TABLEAU_PAT_NAME,TABLEAU_PAT_SECRET,,Primary credentials for Snowflake and Tableau Cloud

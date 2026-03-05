@@ -1,0 +1,26 @@
+column_id,table_id,column_name,display_name,datatype,role,aggregation,description,hidden,group
+col_001,tbl_001,ROW_ID,Row ID,integer,dimension,,Unique row identifier,true,IDs
+col_002,tbl_001,ORDER_ID,Order ID,string,dimension,,Unique order identifier,false,Orders
+col_003,tbl_001,ORDER_DATE,Order Date,date,dimension,,Date the order was placed,false,Dates
+col_004,tbl_001,SHIP_DATE,Ship Date,date,dimension,,Date the order was shipped,false,Dates
+col_005,tbl_001,SHIP_MODE,Ship Mode,string,dimension,,Shipping method selected,false,Shipping
+col_006,tbl_001,CUSTOMER_ID,Customer ID,string,dimension,,Unique customer identifier,false,Customers
+col_007,tbl_001,CUSTOMER_NAME,Customer Name,string,dimension,,Full customer name,false,Customers
+col_008,tbl_001,SEGMENT,Segment,string,dimension,,Customer segment: Consumer Corporate Home Office,false,Customers
+col_009,tbl_001,COUNTRY,Country,string,dimension,,Country of order,false,Geography
+col_010,tbl_001,CITY,City,string,dimension,,City of order,false,Geography
+col_011,tbl_001,STATE,State,string,dimension,,State of order,false,Geography
+col_012,tbl_001,POSTAL_CODE,Postal Code,string,dimension,,Postal code of order,false,Geography
+col_013,tbl_001,REGION,Region,string,dimension,,Sales region: East West Central South,false,Geography
+col_014,tbl_001,PRODUCT_ID,Product ID,string,dimension,,Unique product identifier,false,Products
+col_015,tbl_001,CATEGORY,Category,string,dimension,,Product category: Furniture Office Supplies Technology,false,Products
+col_016,tbl_001,SUB_CATEGORY,Sub-Category,string,dimension,,Product sub-category,false,Products
+col_017,tbl_001,PRODUCT_NAME,Product Name,string,dimension,,Full product name,false,Products
+col_018,tbl_001,SALES,Sales,real,measure,Sum,Order sales amount in USD,false,Financials
+col_019,tbl_001,QUANTITY,Quantity,integer,measure,Sum,Number of units ordered,false,Financials
+col_020,tbl_001,DISCOUNT,Discount,real,measure,Avg,Discount rate applied (0.0 to 1.0),false,Financials
+col_021,tbl_001,PROFIT,Profit,real,measure,Sum,Order profit amount in USD,false,Financials
+col_022,tbl_002,ORDER_ID,Order ID,string,dimension,,FK to ORDERS.ORDER_ID,false,IDs
+col_023,tbl_002,RETURNED,Returned,string,dimension,,Return flag: Yes,false,Returns
+col_024,tbl_003,PERSON,Person,string,dimension,,Regional manager name,false,People
+col_025,tbl_003,REGION,Region,string,dimension,,FK to ORDERS.REGION,false,Geography

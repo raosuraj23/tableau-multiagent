@@ -1,0 +1,3 @@
+datasource_id,datasource_name,connection_id,datasource_type,published_ds_name,published_ds_id,default_schema,primary_table,is_primary,description
+ds_001,Superstore Orders,conn_001,live,,PUBLIC,ORDERS,true,true,
+ds_002,Superstore Published,conn_001,published,Superstore_DS,,PUBLIC,ORDERS,false,Pre-published Tableau Cloud datasource (use when available)

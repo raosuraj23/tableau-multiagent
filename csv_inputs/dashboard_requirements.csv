@@ -1,0 +1,10 @@
+view_id,view_name,view_type,datasource_id,chart_type,rows,columns,color,size,label,filter_fields,sort_by,sort_direction,dashboard_id,dashboard_layout,views_in_dashboard,width_px,height_px,description
+view_001,Sales by Sub-Category,worksheet,ds_001,Bar,SUB_CATEGORY,SUM(SALES),CATEGORY,,SUM(SALES),REGION|SEGMENT,SUM(SALES),desc,,,,,,Sales broken down by sub-category colored by category sorted descending
+view_002,Monthly Sales Trend,worksheet,ds_001,Line,SUM(SALES)|SUM(PROFIT),MONTH(ORDER_DATE),,,,,,asc,,,,,,Monthly sales and profit trend over time dual axis line chart
+view_003,Profit by Region,worksheet,ds_001,Bar,REGION,SUM(PROFIT),REGION,,SUM(PROFIT)|Profit Ratio,,SUM(PROFIT),desc,,,,,,Regional profit comparison with profit ratio labels
+view_004,Sales by Segment,worksheet,ds_001,Pie,,SUM(SALES),SEGMENT,SUM(SALES),SUM(SALES),,SUM(SALES),desc,,,,,,Sales share by customer segment pie chart
+view_005,KPI Sales Total,worksheet,ds_001,Text,,SUM(SALES),,,,,,,,,,,,Total sales KPI card for dashboard header
+view_006,KPI Profit Total,worksheet,ds_001,Text,,SUM(PROFIT),,,,,,,,,,,,Total profit KPI card for dashboard header
+view_007,KPI Orders Count,worksheet,ds_001,Text,,Orders Count,,,,,,,,,,,,Total orders KPI card for dashboard header
+view_008,KPI Profit Ratio,worksheet,ds_001,Text,,Profit Ratio,,,,,,,,,,,,Profit ratio KPI card for dashboard header
+dash_001,Sales Overview Dashboard,dashboard,ds_001,,,,,,,REGION|SEGMENT|ORDER_DATE,,,dash_001,grid-2x2,view_001|view_002|view_003|view_004,1366,768,Main 2x2 executive sales overview dashboard with regional and category filters

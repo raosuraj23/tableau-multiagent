@@ -1,0 +1,11 @@
+metric_id,datasource_id,metric_name,formula,datatype,format_string,description,is_lod,calculation_id
+met_001,ds_001,Profit Ratio,SUM([PROFIT]) / SUM([SALES]),real,#0.00%,Profit as a percentage of total sales,false,
+met_002,ds_001,Avg Discount,AVG([DISCOUNT]),real,#0.0%,Average discount rate applied across orders,false,
+met_003,ds_001,Orders Count,COUNTD([ORDER_ID]),integer,"#,##0",Count of distinct orders,false,
+met_004,ds_001,Customers Count,COUNTD([CUSTOMER_ID]),integer,"#,##0",Count of distinct customers,false,
+met_005,ds_001,Sales per Customer,SUM([SALES]) / COUNTD([CUSTOMER_ID]),real,"$#,##0.00",Average sales value per unique customer,false,
+met_006,ds_001,Profit per Order,SUM([PROFIT]) / COUNTD([ORDER_ID]),real,"$#,##0.00",Average profit per order,false,
+met_007,ds_001,Customer Sales LOD,"{ FIXED [CUSTOMER_ID] : SUM([SALES]) }",real,"$#,##0.00",Total lifetime sales per customer (LOD),true,
+met_008,ds_001,Region Profit Share,SUM([PROFIT]) / TOTAL(SUM([PROFIT])),real,#0.0%,Region profit as share of total profit,false,
+met_009,ds_001,YoY Sales Growth,"(SUM([SALES]) - LOOKUP(SUM([SALES]),-1)) / ABS(LOOKUP(SUM([SALES]),-1))",real,"+#0.0%;-#0.0%;0.0%",Year-over-year sales growth percentage,false,
+met_010,ds_001,Days to Ship,"AVG(DATEDIFF('day',[ORDER_DATE],[SHIP_DATE]))",real,#0.0,Average number of days between order and ship date,false,

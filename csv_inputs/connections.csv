@@ -1,0 +1,2 @@
+connection_id,class,server,dbname,schema,warehouse,port,role,auth_method,auth_id,description
+conn_001,snowflake,michaelkors.us-east-1.snowflakecomputing.com,DEV_DB,PUBLIC,QRY_DEV_WH,443,ANALYST_ROLE,Username Password,auth_001,Primary Snowflake DEV connection for Superstore data

@@ -1,0 +1,14 @@
+mstr_attribute_id,mstr_attribute_name,mstr_object_type,mstr_form_name,mstr_datatype,mstr_description,tableau_field_name,tableau_datatype,tableau_role,tableau_type,tableau_column_id,conversion_status,conversion_notes
+attr_001,Order,Attribute,ID,VARCHAR,Unique order identifier,ORDER_ID,string,dimension,nominal,col_002,mapped,Direct 1:1 mapping
+attr_002,Order,Attribute,Date,DATE,Date the order was placed,ORDER_DATE,date,dimension,ordinal,col_003,mapped,MSTR Date attribute form maps to Tableau date dimension
+attr_003,Customer,Attribute,ID,VARCHAR,Unique customer identifier,CUSTOMER_ID,string,dimension,nominal,col_006,mapped,Direct 1:1 mapping
+attr_004,Customer,Attribute,Name,VARCHAR,Full customer name,CUSTOMER_NAME,string,dimension,nominal,col_007,mapped,Direct 1:1 mapping
+attr_005,Segment,Attribute,DESC,VARCHAR,Customer segment,SEGMENT,string,dimension,nominal,col_008,mapped,Direct 1:1 mapping
+attr_006,Region,Attribute,DESC,VARCHAR,Sales region,REGION,string,dimension,nominal,col_013,mapped,Direct 1:1 mapping
+attr_007,State,Attribute,DESC,VARCHAR,State of order,STATE,string,dimension,nominal,col_011,mapped,Direct 1:1 mapping
+attr_008,City,Attribute,DESC,VARCHAR,City of order,CITY,string,dimension,nominal,col_010,mapped,Direct 1:1 mapping
+attr_009,Category,Attribute,DESC,VARCHAR,Product category,CATEGORY,string,dimension,nominal,col_015,mapped,Direct 1:1 mapping
+attr_010,Sub-Category,Attribute,DESC,VARCHAR,Product sub-category,SUB_CATEGORY,string,dimension,nominal,col_016,mapped,Direct 1:1 mapping
+attr_011,Product,Attribute,Name,VARCHAR,Product name,PRODUCT_NAME,string,dimension,nominal,col_017,mapped,Direct 1:1 mapping
+attr_012,Ship Mode,Attribute,DESC,VARCHAR,Shipping method,SHIP_MODE,string,dimension,nominal,col_005,mapped,Direct 1:1 mapping
+attr_013,Ship Date,Attribute,Date,DATE,Ship date,SHIP_DATE,date,dimension,ordinal,col_004,mapped,MSTR Date attribute form maps to Tableau date dimension

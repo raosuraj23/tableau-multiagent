@@ -1,0 +1,52 @@
+# ============================================================
+# Tableau Multi-Agent System — .gitignore
+# ============================================================
+
+# --- CRITICAL: Never commit secrets ---
+.env
+auth_cache/
+*.key
+*.pem
+keys/
+# --- Virtual environment ---
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# --- State & generated files ---
+state/state.db
+state/checkpoints/
+state/snapshots/
+logs/*.log
+
+# --- Generated Tableau files ---
+tableau/output/
+models/tds/
+models/twb/
+
+# --- Test artifacts ---
+.pytest_cache/
+.coverage
+htmlcov/
+tests/regression/baselines/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Windows ---
+Thumbs.db
+desktop.ini
+*.lnk
+
+# --- Python packaging ---
+*.egg-info/
+dist/
+build/

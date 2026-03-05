@@ -1,0 +1,6 @@
+dimension_id,datasource_id,dimension_name,dimension_type,columns,description
+dim_001,ds_001,Product Hierarchy,hierarchy,col_015|col_016|col_017,Drill-down from Category to Sub-Category to Product Name
+dim_002,ds_001,Geography Hierarchy,hierarchy,col_013|col_011|col_010|col_012,Drill-down from Region to State to City to Postal Code
+dim_003,ds_001,Time Hierarchy,hierarchy,col_003,Order Date hierarchy: Year > Quarter > Month > Day
+dim_004,ds_001,High Value Customers,set,col_007,Customers with lifetime sales above $5000 (top tier)
+dim_005,ds_001,Returned Orders Flag,calc,col_022|col_023,Calculated flag: IF ISNULL([Returned]) THEN 'Not Returned' ELSE 'Returned' END

@@ -1,0 +1,3 @@
+relationship_id,datasource_id,left_table_id,right_table_id,left_key,right_key,join_type,relationship_type,description
+rel_001,ds_001,tbl_001,tbl_002,ORDER_ID,ORDER_ID,left,join,Orders left join Returns on ORDER_ID to flag returned orders
+rel_002,ds_001,tbl_001,tbl_003,REGION,REGION,left,join,Orders left join People on REGION to add regional manager name

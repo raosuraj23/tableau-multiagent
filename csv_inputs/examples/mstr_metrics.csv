@@ -1,0 +1,13 @@
+mstr_metric_id,mstr_metric_name,mstr_formula,mstr_datatype,mstr_format,mstr_description,mstr_complexity,tableau_metric_id,tableau_formula,tableau_datatype,tableau_format,conversion_status,conversion_notes
+mstr_met_001,Total Sales,Sum(Sales),NUMBER,"#,##0.00",Total sales revenue,simple,,"SUM([SALES])",real,"$#,##0.00",mapped,Simple Sum aggregate — direct translation
+mstr_met_002,Total Profit,Sum(Profit),NUMBER,"#,##0.00",Total profit,simple,,"SUM([PROFIT])",real,"$#,##0.00",mapped,Simple Sum aggregate — direct translation
+mstr_met_003,Total Quantity,Sum(Quantity),INTEGER,"#,##0",Total units sold,simple,,"SUM([QUANTITY])",integer,"#,##0",mapped,Simple Sum aggregate — direct translation
+mstr_met_004,Profit Margin,Sum(Profit)/Sum(Sales),NUMBER,#0.00%,Profit as % of sales,compound,met_001,SUM([PROFIT]) / SUM([SALES]),real,#0.00%,mapped,Compound metric: ratio of two sums — maps to calculated field
+mstr_met_005,Average Discount,Avg(Discount),NUMBER,#0.0%,Average discount rate,simple,met_002,AVG([DISCOUNT]),real,#0.0%,mapped,Simple Avg aggregate — direct translation
+mstr_met_006,Order Count,"Count(Distinct Order@ID)",INTEGER,"#,##0",Count of distinct orders,simple,met_003,COUNTD([ORDER_ID]),integer,"#,##0",mapped,MSTR CountDistinct maps to Tableau COUNTD()
+mstr_met_007,Customer Count,"Count(Distinct Customer@ID)",INTEGER,"#,##0",Count of unique customers,simple,met_004,COUNTD([CUSTOMER_ID]),integer,"#,##0",mapped,MSTR CountDistinct maps to Tableau COUNTD()
+mstr_met_008,Sales Per Customer,"Sum(Sales)/Count(Distinct Customer@ID)",NUMBER,"#,##0.00",Average sales per customer,compound,met_005,SUM([SALES]) / COUNTD([CUSTOMER_ID]),real,"$#,##0.00",mapped,Compound: sum divided by count distinct
+mstr_met_009,Days to Ship,Avg(ShipDate-OrderDate),NUMBER,#0.0,Average shipping days,conditional,met_010,"AVG(DATEDIFF('day',[ORDER_DATE],[SHIP_DATE]))",real,#0.0,mapped,MSTR date arithmetic maps to Tableau DATEDIFF()
+mstr_met_010,YoY Growth,"(Sum(Sales) - Sum(Sales) {~-1 Year}) / Abs(Sum(Sales) {~-1 Year})",NUMBER,+#0.0%;-#0.0%,Year over year sales growth,running,met_009,"(SUM([SALES]) - LOOKUP(SUM([SALES]),-1)) / ABS(LOOKUP(SUM([SALES]),-1))",real,+#0.0%;-#0.0%,mapped,MSTR time comparison maps to Tableau LOOKUP() table calc
+mstr_met_011,Customer Lifetime Sales,"Sum(Sales) <Customer>",NUMBER,"#,##0.00",Total sales per customer across all orders,smart_metric,met_007,"{ FIXED [CUSTOMER_ID] : SUM([SALES]) }",real,"$#,##0.00",mapped,MSTR smart metric (level-based) maps to Tableau FIXED LOD expression
+mstr_met_012,Region Profit Share,"Sum(Profit) / Sum(Profit) {~}",NUMBER,#0.0%,Region contribution to total profit,compound,,"SUM([PROFIT]) / TOTAL(SUM([PROFIT]))",real,#0.0%,mapped,MSTR grand total reference maps to Tableau TOTAL() table calculation

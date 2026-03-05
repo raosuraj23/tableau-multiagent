@@ -1,0 +1,2 @@
+project_id,project_name,environment,tableau_site,tableau_server_url,target_project,workbook_name,tableau_version,figma_file_id,enable_extract,description
+proj_001,Superstore Sales Overview,dev,capri-horizons-dev,https://us-east-1.online.tableau.com,Default,Superstore_Sales_Overview,18.1,,false,Executive sales overview dashboard with KPIs by region category and segment

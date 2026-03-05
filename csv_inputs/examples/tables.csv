@@ -1,0 +1,4 @@
+table_id,datasource_id,table_name,schema,alias,is_custom_sql,custom_sql,description
+tbl_001,ds_001,ORDERS,PUBLIC,Orders,false,,Main orders fact table with sales profit quantity and discount
+tbl_002,ds_001,RETURNS,PUBLIC,Returns,false,,Returned orders reference table
+tbl_003,ds_001,PEOPLE,PUBLIC,People,false,,Regional sales manager assignments

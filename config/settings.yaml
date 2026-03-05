@@ -1,0 +1,175 @@
+# ============================================================
+# Tableau Multi-Agent System — config/settings.yaml
+# Global system configuration (non-secret values only)
+# ============================================================
+
+system:
+  name: "Tableau Multi-Agent System"
+  version: "1.0.0"
+  environment: "${ENVIRONMENT}"       # overridden by .env
+  log_level: "${LOG_LEVEL}"
+  state_db_path: "state/state.db"
+  checkpoint_dir: "state/checkpoints"
+  snapshot_dir: "state/snapshots"
+
+# ------------------------------------------------------------
+# Tableau settings
+# ------------------------------------------------------------
+tableau:
+  api_version: "3.21"
+  twb_schema_version: "18.1"
+  source_build: "2024.1.0 (20241.24.0312.1234)"
+  source_platform: "win"
+  default_dashboard_width: 1366
+  default_dashboard_height: 768
+  publish_mode: "Overwrite"           # CreateNew | Overwrite | Append
+  output_dir: "tableau/output"
+  templates_dir: "tableau/templates"
+
+# ------------------------------------------------------------
+# LLM routing — which model handles each agent
+# Claude: XML generation, TWB assembly, technical tasks
+# Gemini: semantic mapping, MSTR conversion, design reasoning
+# ------------------------------------------------------------
+llm_routing:
+  intake_agent: "gemini"
+  validation_agent: "claude"
+  connectivity_agent: "claude"
+  profiler_agent: "gemini"
+  conversion_agent: "gemini"          # MSTR → Tableau mapping
+  semantic_agent: "claude"            # TDS XML generation
+  metric_agent: "claude"              # Calculated field XML
+  tableau_model_agent: "claude"       # Worksheet XML generation
+  dashboard_agent: "claude"           # Dashboard zone XML
+  figma_agent: "gemini"
+  qa_agent: "claude"
+  deployment_agent: "claude"
+  monitoring_agent: "gemini"
+  documentation_agent: "gemini"
+
+# ------------------------------------------------------------
+# LLM model IDs
+# ------------------------------------------------------------
+llm_models:
+  claude:
+    model_id: "claude-sonnet-4-20250514"
+    temperature: 0
+    max_tokens: 8192
+    timeout_seconds: 60
+  gemini:
+    model_id: "gemini-2.0-flash"    # set to "auto" to discover at runtime
+    model_id_fallbacks:             # tried in order if model_id fails
+      - "gemini-2.0-flash-lite"
+      - "gemini-1.5-flash"
+      - "gemini-1.5-pro"
+    temperature: 0.1
+    max_tokens: 8192
+    timeout_seconds: 60
+
+# ------------------------------------------------------------
+# Retry policy
+# ------------------------------------------------------------
+retry:
+  network_timeout:
+    max_attempts: 3
+    wait_multiplier: 2
+    wait_min: 2
+    wait_max: 30
+  auth_failure:
+    max_attempts: 2
+    wait_fixed: 5
+  tableau_publish:
+    max_attempts: 3
+    wait_multiplier: 3
+    wait_min: 10
+    wait_max: 60
+  rate_limit:
+    max_attempts: 5
+    wait_multiplier: 2
+    wait_min: 5
+    wait_max: 120
+
+# ------------------------------------------------------------
+# CSV input model
+# ------------------------------------------------------------
+csv_inputs:
+  directory: "csv_inputs"
+  encoding: "utf-8"
+  required_files:
+    - "project_config.csv"
+    - "data_sources.csv"
+    - "connections.csv"
+    - "auth.csv"
+    - "tables.csv"
+    - "columns.csv"
+    - "relationships.csv"
+    - "metrics.csv"
+    - "dimensions.csv"
+    - "dashboard_requirements.csv"
+    - "mstr_attributes.csv"
+    - "mstr_metrics.csv"
+
+# ------------------------------------------------------------
+# Testing
+# ------------------------------------------------------------
+testing:
+  connectivity:
+    timeout_seconds: 10
+    retry_count: 3
+  schema:
+    fail_on_missing_table: true
+    fail_on_type_mismatch: true
+  metrics:
+    tolerance_percent: 1.0
+    sample_rows: 1000
+  performance:
+    max_dashboard_load_ms: 5000
+    max_query_ms: 30000
+  regression:
+    baseline_dir: "tests/regression/baselines"
+    variance_threshold: 0.001
+
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
+logging:
+  format: "json"
+  files:
+    orchestrator: "logs/orchestrator.log"
+    agents: "logs/agents.log"
+    audit: "logs/audit.log"
+  rotation:
+    max_bytes: 10485760    # 10 MB
+    backup_count: 5
+
+# ------------------------------------------------------------
+# Snowflake type mapping to Tableau
+# ------------------------------------------------------------
+snowflake_type_map:
+  VARCHAR:      {datatype: string,   role: dimension, type: nominal}
+  TEXT:         {datatype: string,   role: dimension, type: nominal}
+  STRING:       {datatype: string,   role: dimension, type: nominal}
+  CHAR:         {datatype: string,   role: dimension, type: nominal}
+  NUMBER:       {datatype: real,     role: measure,   type: quantitative}
+  DECIMAL:      {datatype: real,     role: measure,   type: quantitative}
+  NUMERIC:      {datatype: real,     role: measure,   type: quantitative}
+  FLOAT:        {datatype: real,     role: measure,   type: quantitative}
+  FLOAT4:       {datatype: real,     role: measure,   type: quantitative}
+  FLOAT8:       {datatype: real,     role: measure,   type: quantitative}
+  DOUBLE:       {datatype: real,     role: measure,   type: quantitative}
+  REAL:         {datatype: real,     role: measure,   type: quantitative}
+  INTEGER:      {datatype: integer,  role: measure,   type: quantitative}
+  INT:          {datatype: integer,  role: measure,   type: quantitative}
+  BIGINT:       {datatype: integer,  role: measure,   type: quantitative}
+  SMALLINT:     {datatype: integer,  role: measure,   type: quantitative}
+  TINYINT:      {datatype: integer,  role: measure,   type: quantitative}
+  BOOLEAN:      {datatype: boolean,  role: dimension, type: nominal}
+  DATE:         {datatype: date,     role: dimension, type: ordinal}
+  TIME:         {datatype: datetime, role: dimension, type: ordinal}
+  TIMESTAMP:    {datatype: datetime, role: dimension, type: ordinal}
+  TIMESTAMP_NTZ: {datatype: datetime, role: dimension, type: ordinal}
+  TIMESTAMP_LTZ: {datatype: datetime, role: dimension, type: ordinal}
+  TIMESTAMP_TZ: {datatype: datetime, role: dimension, type: ordinal}
+  VARIANT:      {datatype: string,   role: dimension, type: nominal}
+  OBJECT:       {datatype: string,   role: dimension, type: nominal}
+  ARRAY:        {datatype: string,   role: dimension, type: nominal}
