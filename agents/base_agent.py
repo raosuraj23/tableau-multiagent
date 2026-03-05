@@ -440,11 +440,11 @@ class BaseAgent(ABC):
         if result.status == AgentStatus.SUCCESS:
             self.logger.info(event, **log_kw)
         elif result.status == AgentStatus.WARNING:
-            self.logger.warning(event, warnings=[w.message for w in result.warnings],
-                                **log_kw)
+            warnings_list = [getattr(w, "message", str(w)) for w in result.warnings]
+            self.logger.warning(event, warnings=warnings_list, **log_kw)
         else:
-            self.logger.error(event, errors=[e.message for e in result.errors],
-                              **log_kw)
+            errors_list = [getattr(e, "message", str(e)) for e in result.errors]
+            self.logger.error(event, errors=errors_list, **log_kw)
 
     def _elapsed_ms(self) -> float:
         """Returns milliseconds since log_start() or execute() was called."""
