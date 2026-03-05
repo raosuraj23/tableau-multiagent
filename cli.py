@@ -211,7 +211,7 @@ def validate(csv_dir):
 
     _quiet_agent_logs()
     from agents.base_agent import PhaseContext
-    from agents.intake_agent import IntakeAgent
+    from agents.intake_agent import InputValidationAgent
     from agents.validation_agent import ValidationAgent
 
     _quiet_agent_logs()  # re-apply after imports trigger structlog init
@@ -220,7 +220,7 @@ def validate(csv_dir):
 
     # Intake
     console.print("\n[bold]Phase 01:[/] Input Intake…", end=" ")
-    intake_agent = IntakeAgent(config={"csv_dir": csv_dir})
+    intake_agent = InputValidationAgent(config={"csv_dir": csv_dir})
     result = intake_agent.execute(state)
     state.update(result.output)
 
