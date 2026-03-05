@@ -1,11 +1,11 @@
-metric_id,datasource_id,metric_name,formula,datatype,format_string,description,is_lod,calculation_id
-met_001,ds_001,Profit Ratio,SUM([PROFIT]) / SUM([SALES]),real,#0.00%,Profit as a percentage of total sales,false,
-met_002,ds_001,Avg Discount,AVG([DISCOUNT]),real,#0.0%,Average discount rate applied across orders,false,
-met_003,ds_001,Orders Count,COUNTD([ORDER_ID]),integer,"#,##0",Count of distinct orders,false,
-met_004,ds_001,Customers Count,COUNTD([CUSTOMER_ID]),integer,"#,##0",Count of distinct customers,false,
-met_005,ds_001,Sales per Customer,SUM([SALES]) / COUNTD([CUSTOMER_ID]),real,"$#,##0.00",Average sales value per unique customer,false,
-met_006,ds_001,Profit per Order,SUM([PROFIT]) / COUNTD([ORDER_ID]),real,"$#,##0.00",Average profit per order,false,
-met_007,ds_001,Customer Sales LOD,"{ FIXED [CUSTOMER_ID] : SUM([SALES]) }",real,"$#,##0.00",Total lifetime sales per customer (LOD),true,
-met_008,ds_001,Region Profit Share,SUM([PROFIT]) / TOTAL(SUM([PROFIT])),real,#0.0%,Region profit as share of total profit,false,
-met_009,ds_001,YoY Sales Growth,"(SUM([SALES]) - LOOKUP(SUM([SALES]),-1)) / ABS(LOOKUP(SUM([SALES]),-1))",real,"+#0.0%;-#0.0%;0.0%",Year-over-year sales growth percentage,false,
-met_010,ds_001,Days to Ship,"AVG(DATEDIFF('day',[ORDER_DATE],[SHIP_DATE]))",real,#0.0,Average number of days between order and ship date,false,
+metric_id,metric_name,formula,datatype,format_string,description,is_lod
+met_001,Profit Ratio,SUM([Profit])/SUM([Sales]),real,#0.0%,Profit as a percentage of Sales,false
+met_002,Days to Ship,DATEDIFF('day',[Order Date],[Ship Date]),integer,#,Average days between order placed and shipped,false
+met_003,# Orders,COUNTD([Order ID]),integer,#,Count of distinct orders,false
+met_004,# Customers,COUNTD([Customer ID]),integer,#,Count of distinct customers,false
+met_005,Sales vs PY %,(SUM([Sales]) - LOOKUP(SUM([Sales]),-1)) / ABS(LOOKUP(SUM([Sales]),-1)),real,+#0.0%;-#0.0%,Year-over-year Sales growth percentage,false
+met_006,Profit vs PY %,(SUM([Profit]) - LOOKUP(SUM([Profit]),-1)) / ABS(LOOKUP(SUM([Profit]),-1)),real,+#0.0%;-#0.0%,Year-over-year Profit growth percentage,false
+met_007,Is Profitable,IF SUM([Profit]) > 0 THEN 'Profitable' ELSE 'Not Profitable' END,string,,Profitability flag for color encoding,false
+met_008,Customer Type,IF COUNTD([Order ID]) > 1 THEN 'Repeat Customer' ELSE 'New Customer' END,string,,Classifies customer as new or repeat,false
+met_009,Sales CY,{ FIXED YEAR([Order Date]) : SUM([Sales]) },real,"$#,##0.0K",Current year sales using LOD,true
+met_010,Profit CY,{ FIXED YEAR([Order Date]) : SUM([Profit]) },real,"$#,##0.0K",Current year profit using LOD,true

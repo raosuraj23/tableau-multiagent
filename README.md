@@ -1,248 +1,211 @@
 # Tableau Multi-Agent System
 
-Automated Tableau Cloud workbook generation from MicroStrategy reports and Snowflake datasources using a LangGraph multi-agent pipeline.
+Automated Tableau Cloud workbook generation from MicroStrategy metric CSVs and Figma designs, always connecting to **published** Tableau datasources discovered via the Tableau Metadata API.
 
 ---
 
 ## Architecture Overview
 
 ```
-MicroStrategy CSVs          Snowflake Schema
-  (attributes + metrics)      (tables + views)
-         │                          │
-         ▼                          ▼
-  ┌─────────────────────────────────────────────┐
-  │           MASTER ORCHESTRATOR               │
-  │         (LangGraph DAG + SQLite state)      │
-  └──────┬──────┬──────┬──────┬──────┬──────────┘
-         │      │      │      │      │
-     Intake  Validate Connect Profile Convert
-         │
-    ┌────┴─────────────────────────┐
-    │  Claude (XML generation)     │  ← Semantic, Metric, Worksheet, Dashboard
-    │  Gemini (semantic mapping)   │  ← MSTR conversion, profiling, docs
-    └──────────────────────────────┘
-         │
-    ┌────▼───────────┐
-    │ Tableau Cloud  │
-    │  (published)   │
-    └────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    MASTER ORCHESTRATOR                          │
+│              (LangGraph DAG  •  SQLite state)                   │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                  ┌──────────▼──────────┐
+                  │  Input & Validation  │  ← mstr_metrics.csv
+                  │       Agent         │    mstr_attributes.csv
+                  └──────────┬──────────┘    dashboard_requirements.csv
+                             │               project_config.csv
+              ┌──────────────┴─────────────┐
+              │ parallel fan-out            │
+              ▼                            ▼
+  ┌────────────────────┐      ┌────────────────────────┐
+  │  MSTR Metric        │      │   Figma Design Agent   │
+  │  Mapper Agent       │      │                        │
+  │                     │      │  PRIMARY: Figma API     │
+  │  • Tableau Metadata │      │  FALLBACK: Claude Vision│
+  │    API discovery    │      │  DEFAULT: 2×2 grid      │
+  │  • Claude LLM       │      └────────────────────────┘
+  │    formula mapping  │
+  └────────────────────┘
+              │                            │
+              └──────────────┬─────────────┘
+                             │ fan-in
+                  ┌──────────▼──────────┐
+                  │   TWB Generator     │  ← Deterministic XML
+                  │      Agent          │    Published DS (sqlproxy)
+                  └──────────┬──────────┘    Worksheets + Dashboard
+                             │               Color palette
+                  ┌──────────▼──────────┐
+                  │  Deployment Agent   │  → Tableau Cloud
+                  └─────────────────────┘    (TSC publish)
 ```
 
-### LLM Routing
+---
 
-| Agent | Model | Reason |
-|-------|-------|--------|
-| MSTR conversion | Gemini | Semantic interpretation of business logic |
-| TDS / TWB XML generation | Claude | Precise, structured XML output |
-| Worksheet builder | Claude | Schema-critical field references |
-| Dashboard layout | Claude | Zone coordinate calculation |
-| Documentation | Gemini | Natural language generation |
-| Profiling / recommendations | Gemini | Data analysis reasoning |
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Published datasources only** | No direct DB credentials in workbooks; all auth handled by Tableau Cloud |
+| **Tableau Metadata API for DS discovery** | Discovers real field names/types before generating field references |
+| **LLM for MSTR mapping + Figma Vision** | AI handles semantic ambiguity; XML generation stays deterministic |
+| **CSV-first inputs** | Fully offline-compatible; no MSTR API dependency |
+| **Figma API → Vision fallback** | Works with or without a Figma token |
+
+---
+
+## Agent Summary (4 specialist + orchestrator)
+
+| # | Agent | Phase | LLM? |
+|---|-------|-------|------|
+| 0 | Master Orchestrator | All | No |
+| 1 | Input & Validation | Intake | No |
+| 2 | MSTR Metric Mapper | Parallel A | **Claude** (formula mapping) |
+| 3 | Figma Design | Parallel B | **Claude Vision** (fallback) |
+| 4 | TWB Generator | Assembly | No (deterministic XML) |
+| 5 | Deployment | Publish | No |
 
 ---
 
 ## Quick Start (Windows)
 
 ### Prerequisites
-- Python 3.12 ([download](https://python.org))
-- Git (optional)
+- Python 3.12
+- Anthropic API key — [console.anthropic.com](https://console.anthropic.com)
 - Tableau Cloud account with Personal Access Token
-- Snowflake account credentials
-- Anthropic API key ([console.anthropic.com](https://console.anthropic.com))
-- Google AI Studio key ([aistudio.google.com](https://aistudio.google.com))
+- Figma Personal Access Token *(optional — image fallback available)*
 
 ### Setup
 
 ```bat
-REM 1. Clone or extract the project
-cd C:\Projects
-git clone <repo-url> tableau-multiagent
-cd tableau-multiagent
+cd C:\Projects\tableau-multiagent
 
-REM 2. Run the one-command setup
-setup.bat
+python -m venv .venv
+.venv\Scripts\activate
 
-REM 3. Edit .env with your credentials
+pip install -r requirements.txt
+
+copy .env.template .env
 notepad .env
+```
 
-REM 4. Validate everything is working
-python validate_setup.py
+### .env template
 
-REM 5. Fill in your project CSVs
-REM    (copy from csv_inputs\examples\ and edit)
+```
+ANTHROPIC_API_KEY=sk-ant-...
+FIGMA_TOKEN=figd_...                  # optional
+TAB_PAT_NAME=my-pat
+TAB_PAT_SECRET=...
+```
 
-REM 6. Dry run (validates + generates, no publish)
+### Fill in your CSVs
+
+```bat
+REM Copy examples and edit
+xcopy csv_inputs\examples\* csv_inputs\ /Y
+```
+
+### Run
+
+```bat
+# Validate inputs only
+python cli.py validate
+
+# Generate TWB without publishing
 python cli.py run --env dev --dry-run
 
-REM 7. Full run
+# Full pipeline
 python cli.py run --env dev
-```
 
----
+# Full pipeline with image fallback instead of Figma API
+python cli.py run --env dev --figma-image path\to\dashboard.png
 
-## Project Structure
-
-```
-tableau-multiagent/
-├── agents/                     # Individual agent implementations
-│   ├── base_agent.py           # Abstract base class
-│   ├── intake_agent.py         # CSV ingestion
-│   ├── validation_agent.py     # Metadata validation
-│   ├── connectivity_agent.py   # Connection testing
-│   ├── profiler_agent.py       # Snowflake schema profiling
-│   ├── conversion_agent.py     # MSTR → Tableau mapping (Gemini)
-│   ├── semantic_agent.py       # TDS XML generation (Claude)
-│   ├── metric_agent.py         # Calculated field XML (Claude)
-│   ├── tableau_model_agent.py  # Worksheet XML (Claude)
-│   ├── dashboard_agent.py      # Dashboard zone XML (Claude)
-│   ├── qa_agent.py             # Testing & validation
-│   ├── deployment_agent.py     # Tableau Cloud publish
-│   ├── monitoring_agent.py     # Post-publish health
-│   └── documentation_agent.py # Auto-doc generation (Gemini)
-│
-├── orchestrator/
-│   ├── orchestrator.py         # LangGraph DAG
-│   ├── state_machine.py        # Phase transitions
-│   └── retry_engine.py         # Tenacity retry logic
-│
-├── config/
-│   ├── settings.yaml           # Global config
-│   └── llm_config.yaml         # Per-agent LLM routing
-│
-├── csv_inputs/                 # Your project data (fill these in)
-│   ├── project_config.csv
-│   ├── data_sources.csv
-│   ├── connections.csv
-│   ├── auth.csv
-│   ├── tables.csv
-│   ├── columns.csv
-│   ├── relationships.csv
-│   ├── metrics.csv
-│   ├── dimensions.csv
-│   ├── dashboard_requirements.csv
-│   ├── mstr_attributes.csv     # Export from MicroStrategy
-│   └── mstr_metrics.csv        # Export from MicroStrategy
-│
-├── state/
-│   ├── state.db                # SQLite state store
-│   ├── checkpoints/            # LangGraph checkpoints
-│   └── snapshots/              # Phase output snapshots
-│
-├── models/
-│   ├── tds/                    # Generated TDS datasource files
-│   └── twb/                    # Generated TWB workbook files
-│
-├── tableau/
-│   ├── output/                 # Final .twb / .twbx files
-│   └── templates/              # Base TWB templates
-│
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── regression/
-│
-├── logs/
-│   ├── orchestrator.log
-│   ├── agents.log
-│   └── audit.log
-│
-├── cli.py                      # CLI entrypoint
-├── validate_setup.py           # Environment validator
-├── setup.bat                   # Windows one-command setup
-├── requirements.txt
-├── .env.template               # Credentials template
-└── README.md
+# Overwrite existing workbook
+python cli.py run --env prod --allow-overwrite
 ```
 
 ---
 
 ## CSV Input Files
 
-All project configuration lives in `csv_inputs/`. The system is **fully driven by these CSVs** — no code changes required for new projects.
+All project configuration lives in `csv_inputs/`. No code changes needed for new projects.
 
-| File | Purpose |
-|------|---------|
-| `project_config.csv` | Project settings, Tableau site, target workbook name |
-| `data_sources.csv` | Datasource definitions (published vs live vs extract) |
-| `connections.csv` | Snowflake connection parameters |
-| `auth.csv` | Credential env var references (no actual secrets) |
-| `tables.csv` | Database tables / views used |
-| `columns.csv` | Column definitions, types, roles |
-| `relationships.csv` | Table join definitions |
-| `metrics.csv` | Calculated field definitions |
-| `dimensions.csv` | Custom dimension / hierarchy definitions |
-| `dashboard_requirements.csv` | Sheet types, chart types, layout spec |
-| `mstr_attributes.csv` | MicroStrategy attribute export |
-| `mstr_metrics.csv` | MicroStrategy metric / formula export |
+| File | Required | Purpose |
+|------|----------|---------|
+| `project_config.csv` | ✅ | Project settings, Tableau site, published DS name, Figma file ID |
+| `mstr_metrics.csv` | ✅ | MSTR metric definitions + formulas |
+| `mstr_attributes.csv` | ✅ | MSTR attribute definitions |
+| `dashboard_requirements.csv` | ✅ | Sheet specs: chart types, rows/cols shelves, layout |
+| `figma_layout.csv` | ⬜ | Manual layout override (used when no Figma API/image) |
 
-See `csv_inputs/examples/` for pre-filled sample files.
+### Key fields: project_config.csv
 
----
+| Column | Description | Example |
+|--------|-------------|---------|
+| `published_datasource_name` | Name of the published DS on Tableau Cloud | `Sales_Analytics` |
+| `figma_file_id` | Figma file key (from URL) | `abc123xyz` |
+| `tableau_server_url` | Tableau Cloud base URL | `https://10ax.online.tableau.com` |
+| `tableau_site` | Site ID | `mycompany` |
+| `target_project` | Tableau project folder | `Sales` |
 
-## CLI Commands
+### Key fields: mstr_metrics.csv
 
-```bat
-# Full pipeline
-python cli.py run --env dev
+| Column | Description | Example |
+|--------|-------------|---------|
+| `metric_name` | Display name | `Profit Ratio` |
+| `mstr_formula` | MSTR formula syntax | `Sum(Profit) / Sum(Revenue)` |
+| `datatype` | real / integer / string / date | `real` |
+| `format_string` | Tableau format string | `#,##0.00%` |
 
-# Validate CSVs only (no generation)
-python cli.py validate --csv-dir csv_inputs\
+### Key fields: dashboard_requirements.csv
 
-# Dry run (generate TWB but don't publish)
-python cli.py run --env dev --dry-run
-
-# Resume from a specific phase
-python cli.py run --phase semantic
-
-# Check current workflow state
-python cli.py status
-
-# Rollback last Tableau Cloud deployment
-python cli.py rollback
-
-# Overwrite existing workbook on prod
-python cli.py run --env prod --allow-overwrite
-```
+| Column | Description | Example |
+|--------|-------------|---------|
+| `view_id` | Unique ID | `view_001` |
+| `view_type` | `worksheet` or `dashboard` | `worksheet` |
+| `chart_type` | Bar / Line / Pie / Text / Map | `Bar` |
+| `rows` | Rows shelf field | `Sub-Category` |
+| `columns` | Columns shelf field | `SUM(Sales)` |
+| `views_in_dashboard` | Pipe-separated view_ids | `view_001\|view_002` |
 
 ---
 
-## Workflow Phases
+## Pipeline Flow
 
 ```
-IDLE → INTAKE → VALIDATING → CONNECTING → PROFILING
-→ CONVERTING → MODELING → GENERATING → TESTING
-→ DEPLOYING → MONITORING → COMPLETE
+IDLE → INTAKE → MAPPING+DESIGN (parallel) → GENERATING → DEPLOYING → COMPLETE
+                                                       ↓
+                                              (abort on critical errors)
 ```
 
-Each phase is independently retriable. Failed phases are checkpointed — resume from the failure point without rerunning earlier phases.
+Each phase is independently checkpointed. A failed phase can be retried without
+rerunning earlier phases.
+
+---
+
+## Removed from Previous Architecture
+
+The following agents and concerns have been **removed** in this focused redesign:
+
+| Removed | Reason |
+|---------|--------|
+| Connectivity Testing Agent | No direct DB connections — published DS only |
+| Source Schema Profiler Agent | Tableau Metadata API handles schema discovery |
+| Semantic Model / TDS Agent | sqlproxy pattern replaces TDS XML generation |
+| Metric Definition Agent | Merged into MSTR Metric Mapper |
+| Tableau Model Agent | Merged into TWB Generator |
+| Dashboard Agent | Merged into TWB Generator |
+| Monitoring Agent | Out of scope for workbook generation |
+| Documentation Agent | Out of scope; can be added back as standalone |
+| Direct DB drivers (Snowflake, Postgres) | Not needed with published DS |
 
 ---
 
 ## Security
 
 - All credentials stored as **OS environment variables** only
-- `auth.csv` contains env var **names**, never actual values
-- `.env` is in `.gitignore` — never committed to git
-- Snowflake password masked in all log output
-- Tableau PAT rotation recommended every 90 days
-
----
-
-## Development Artifact Sequence
-
-| # | Artifact | Status |
-|---|----------|--------|
-| 1 | Project Scaffold (this) | ✅ Complete |
-| 2 | CSV Input Templates (all 12 files) | ⏳ Next |
-| 3 | `agents/base_agent.py` | Pending |
-| 4 | `agents/intake_agent.py` | Pending |
-| 5 | `agents/validation_agent.py` | Pending |
-| 6 | `agents/semantic_agent.py` | Pending |
-| 7 | `agents/metric_agent.py` | Pending |
-| 8 | `agents/tableau_model_agent.py` | Pending |
-| 9 | `agents/dashboard_agent.py` | Pending |
-| 10 | `agents/deployment_agent.py` | Pending |
-| 11 | `orchestrator/orchestrator.py` | Pending |
-| 12 | `cli.py` | Pending |
-| 13 | `tests/` | Pending |
+- `.env` is `.gitignore`d — never committed
+- Tableau PAT tokens: rotate every 90 days
+- No DB passwords ever touch the workbook files (published DS handles auth)

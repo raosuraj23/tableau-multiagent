@@ -1,13 +1,12 @@
 # ============================================================
 # Tableau Multi-Agent System — requirements.txt
 # Python 3.12 | Windows 11
-# ============================================================
-# IMPORTANT: The LangChain ecosystem (langgraph, langchain*) must be
-# solved together by pip. Use >= bounds, never == pins for these packages.
-# All other packages use exact pins for reproducibility.
+#
+# Focused on: Figma → TWB generation + MSTR CSV mapping
+# Published Tableau datasources only (no direct DB connections)
 # ============================================================
 
-# --- LangChain ecosystem (let pip solve as a group) ---
+# --- LangChain / LangGraph ecosystem (let pip solve as a group) ---
 langgraph>=1.0.0
 langchain>=1.2.0
 langchain-core>=1.2.0
@@ -15,37 +14,31 @@ langchain-anthropic>=1.3.0
 langchain-google-genai>=4.2.0
 
 # --- LLM SDKs ---
-anthropic>=0.84.0
-google-genai>=1.5.0
+anthropic>=0.50.0          # Claude (metric mapping + Vision fallback)
+google-genai>=1.5.0        # Gemini (optional: documentation agent)
 
 # --- Tableau ---
-tableauserverclient>=0.33.0
-tableau-tools>=6.0.0
+tableauserverclient>=0.33.0   # Publish workbooks; call Metadata API
+tableau-tools>=6.0.0          # TWB/TDS validation helper
 
 # --- XML / Data ---
-lxml>=5.3.0
-pandas>=2.2.0
-openpyxl>=3.1.5
-great-expectations>=0.18.0
-
-# --- Snowflake ---
-snowflake-connector-python>=3.12.0
-snowflake-sqlalchemy>=1.6.0
+lxml>=5.3.0                   # XML parsing and validation
+pandas>=2.2.0                 # CSV ingestion
+openpyxl>=3.1.5               # Excel support (optional input format)
 
 # --- Web / API ---
-requests>=2.32.0
-httpx>=0.27.0
+requests>=2.32.0              # Figma API calls
+httpx>=0.27.0                 # Async HTTP (optional)
 
 # --- CLI / Logging ---
 click>=8.1.7
 rich>=13.9.0
 structlog>=24.4.0
-python-dotenv>=1.0.1
-tenacity>=9.0.0
-pyyaml>=6.0.2
+python-dotenv>=1.0.1          # Load credentials from .env
+tenacity>=9.0.0               # Retry logic
 
 # --- State Store ---
-sqlalchemy>=2.0.36
+sqlalchemy>=2.0.36            # SQLite ORM for LangGraph checkpointing
 
 # --- Validation ---
 jsonschema>=4.23.0
@@ -53,9 +46,10 @@ pydantic>=2.9.0
 
 # --- Utilities ---
 jinja2>=3.1.4
-python-docx>=1.1.2
+python-docx>=1.1.2            # Documentation agent output
 tabulate>=0.9.0
 colorama>=0.4.6
+typing-extensions>=4.12.0
 
 # --- Testing ---
 pytest>=7.4.0

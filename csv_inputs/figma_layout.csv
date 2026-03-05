@@ -1,0 +1,37 @@
+element_id,element_type,name,value,category,zone_view_id,x_px,y_px,w_px,h_px,dashboard_id,notes
+col_001,color,Dark Background,#111827,Dark Mode,,,,,,all_dark,Primary dark background
+col_002,color,Primary Blue,#00A3E0,Brand,,,,,,all,Main accent blue
+col_003,color,Mid Blue,#1B6EBE,Brand,,,,,,all,Secondary blue
+col_004,color,Light Blue,#7EC8E3,Brand,,,,,,all,Light accent
+col_005,color,Profitable Green,#00C087,Data,,,,,,all,Profitable indicator
+col_006,color,Not Profitable Red,#FF4D4D,Data,,,,,,all,Not profitable indicator
+col_007,color,Light Background,#F5F7FA,Light Mode,,,,,,home,Home dashboard background
+col_008,color,Text Light,#FFFFFF,Dark Mode,,,,,,all_dark,Primary text dark mode
+col_009,color,Text Dark,#1A1A2E,Light Mode,,,,,,home,Primary text light mode
+col_010,color,Card Dark,#1C2333,Dark Mode,,,,,,all_dark,Card/panel background dark
+font_001,font,Title Font,Arial Bold 28px,Typography,,,,,,all,Dashboard title
+font_002,font,Subtitle Font,Arial Regular 14px,Typography,,,,,,all,Dashboard subtitle
+font_003,font,KPI Value Font,Arial Bold 32px,Typography,,,,,,all,Large KPI numbers
+font_004,font,Body Font,Arial Regular 12px,Typography,,,,,,all,Table and label text
+font_005,font,Section Header,Arial SemiBold 16px,Typography,,,,,,all,Chart section labels
+zone_h01,zone,Home Left Panel,kpi_sales|kpi_profit|kpi_orders|kpi_customers,Layout,kpi_sales,240,130,345,770,dash_home,4 KPI cards stacked vertically
+zone_h02,zone,Home Map,sales_by_state,Layout,sales_by_state,595,130,420,370,dash_home,US States map
+zone_h03,zone,Home Region Bar,sales_by_region,Layout,sales_by_region,1025,130,255,370,dash_home,Sales by Region vertical bar
+zone_h04,zone,Home Segment,sales_by_segment,Layout,sales_by_segment,595,510,290,190,dash_home,Sales by Segment bar
+zone_h05,zone,Home Category,sales_by_category,Layout,sales_by_category,595,700,290,200,dash_home,Sales by Category horizontal bar
+zone_h06,zone,Home Top Sub-Cat,top10_subcategory,Layout,top10_subcategory,895,510,385,390,dash_home,Top 10 Sub-Category horizontal bar
+zone_p01,zone,Product Left Panel,,Layout,kpi_sales,240,130,345,770,dash_product,4 KPI cards stacked
+zone_p02,zone,Product Category Bars,sales_by_prod_category,Layout,sales_by_prod_category,595,130,685,290,dash_product,Sales by Category with sparklines
+zone_p03,zone,Top 18 Products,top18_products,Layout,top18_products,595,430,685,240,dash_product,Horizontal bar top 18 products
+zone_p04,zone,Profit Ratio Table,profit_ratio_top24,Layout,profit_ratio_top24,595,680,685,220,dash_product,Profit ratio table top 24
+zone_l01,zone,Location Left Panel,,Layout,kpi_sales,240,130,345,770,dash_location,4 KPI cards stacked
+zone_l02,zone,Region Monthly Bars,sales_by_region_monthly,Layout,sales_by_region_monthly,595,130,685,380,dash_location,Small multiples by region
+zone_l03,zone,State KPI Table,kpis_by_state,Layout,kpis_by_state,595,520,685,380,dash_location,KPI table by state/city
+zone_o01,zone,Order Trend Chart,order_trend,Layout,order_trend,240,130,1040,260,dash_orders,Full-width area chart
+zone_o02,zone,Order Detail Table,order_details_table,Layout,order_details_table,240,400,1040,500,dash_orders,Full-width order detail table
+zone_c01,zone,Customer Left Panel,,Layout,kpi_sales,240,130,345,770,dash_customers,4 KPI cards stacked
+zone_c02,zone,Segment Bars,sales_by_cust_segment,Layout,sales_by_cust_segment,595,130,685,250,dash_customers,Customer segment bars with sparklines
+zone_c03,zone,Top 15 Customers,top15_customers,Layout,top15_customers,595,390,685,230,dash_customers,Top 15 customer bar
+zone_c04,zone,New Repeat Trend,new_repeat_trend,Layout,new_repeat_trend,595,630,685,270,dash_customers,New vs repeat customer trend line
+spacing_001,spacing,Grid Gap,8px,Spacing,,,,,,all,Gap between zones
+spacing_002,spacing,Inner Padding,16px,Spacing,,,,,,all,Zone inner padding

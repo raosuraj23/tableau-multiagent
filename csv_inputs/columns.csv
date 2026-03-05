@@ -1,26 +1,21 @@
-column_id,table_id,column_name,display_name,datatype,role,aggregation,description,hidden,group
-col_001,tbl_001,ROW_ID,Row ID,integer,dimension,,Unique row identifier,true,IDs
-col_002,tbl_001,ORDER_ID,Order ID,string,dimension,,Unique order identifier,false,Orders
-col_003,tbl_001,ORDER_DATE,Order Date,date,dimension,,Date the order was placed,false,Dates
-col_004,tbl_001,SHIP_DATE,Ship Date,date,dimension,,Date the order was shipped,false,Dates
-col_005,tbl_001,SHIP_MODE,Ship Mode,string,dimension,,Shipping method selected,false,Shipping
-col_006,tbl_001,CUSTOMER_ID,Customer ID,string,dimension,,Unique customer identifier,false,Customers
-col_007,tbl_001,CUSTOMER_NAME,Customer Name,string,dimension,,Full customer name,false,Customers
-col_008,tbl_001,SEGMENT,Segment,string,dimension,,Customer segment: Consumer Corporate Home Office,false,Customers
-col_009,tbl_001,COUNTRY,Country,string,dimension,,Country of order,false,Geography
-col_010,tbl_001,CITY,City,string,dimension,,City of order,false,Geography
-col_011,tbl_001,STATE,State,string,dimension,,State of order,false,Geography
-col_012,tbl_001,POSTAL_CODE,Postal Code,string,dimension,,Postal code of order,false,Geography
-col_013,tbl_001,REGION,Region,string,dimension,,Sales region: East West Central South,false,Geography
-col_014,tbl_001,PRODUCT_ID,Product ID,string,dimension,,Unique product identifier,false,Products
-col_015,tbl_001,CATEGORY,Category,string,dimension,,Product category: Furniture Office Supplies Technology,false,Products
-col_016,tbl_001,SUB_CATEGORY,Sub-Category,string,dimension,,Product sub-category,false,Products
-col_017,tbl_001,PRODUCT_NAME,Product Name,string,dimension,,Full product name,false,Products
-col_018,tbl_001,SALES,Sales,real,measure,Sum,Order sales amount in USD,false,Financials
-col_019,tbl_001,QUANTITY,Quantity,integer,measure,Sum,Number of units ordered,false,Financials
-col_020,tbl_001,DISCOUNT,Discount,real,measure,Avg,Discount rate applied (0.0 to 1.0),false,Financials
-col_021,tbl_001,PROFIT,Profit,real,measure,Sum,Order profit amount in USD,false,Financials
-col_022,tbl_002,ORDER_ID,Order ID,string,dimension,,FK to ORDERS.ORDER_ID,false,IDs
-col_023,tbl_002,RETURNED,Returned,string,dimension,,Return flag: Yes,false,Returns
-col_024,tbl_003,PERSON,Person,string,dimension,,Regional manager name,false,People
-col_025,tbl_003,REGION,Region,string,dimension,,FK to ORDERS.REGION,false,Geography
+column_id,column_name,display_name,datatype,role,aggregation,description,hidden,group
+col_001,Order ID,Order ID,string,dimension,,Unique order identifier,false,Orders
+col_002,Order Date,Order Date,date,dimension,,Date order was placed,false,Orders
+col_003,Ship Date,Ship Date,date,dimension,,Date order was shipped,false,Orders
+col_004,Ship Mode,Ship Mode,string,dimension,,Shipping method selected,false,Orders
+col_005,Customer ID,Customer ID,string,dimension,,Unique customer identifier,true,Customers
+col_006,Customer Name,Customer Name,string,dimension,,Full customer name,false,Customers
+col_007,Segment,Segment,string,dimension,,Customer segment: Consumer / Corporate / Home Office,false,Customers
+col_008,Country/Region,Country/Region,string,dimension,,Country or region,false,Location
+col_009,City,City,string,dimension,,City name,false,Location
+col_010,State/Province,State/Province,string,dimension,,State or province,false,Location
+col_011,Postal Code,Postal Code,string,dimension,,Postal/ZIP code,false,Location
+col_012,Region,Region,string,dimension,,Sales region: East / West / Central / South,false,Location
+col_013,Product ID,Product ID,string,dimension,,Unique product identifier,true,Products
+col_014,Category,Category,string,dimension,,Product category: Technology / Office Supplies / Furniture,false,Products
+col_015,Sub-Category,Sub-Category,string,dimension,,Product sub-category,false,Products
+col_016,Product Name,Product Name,string,dimension,,Full product name,false,Products
+col_017,Sales,Sales,real,measure,Sum,Revenue from orders,false,Financials
+col_018,Quantity,Quantity,integer,measure,Sum,Units ordered,false,Financials
+col_019,Discount,Discount,real,measure,Avg,Discount applied (0-1),false,Financials
+col_020,Profit,Profit,real,measure,Sum,Net profit,false,Financials
