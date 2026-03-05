@@ -1,841 +1,911 @@
 # agents/validation_agent.py
 """
-ValidationAgent — Metadata Validation (Phase 02)
-=================================================
+Agent #03 — Metadata Validation Agent
+Phase 02: Metadata Validation
 
-Reads the ProjectSpec produced by IntakeAgent and applies 6 categories
-of validation rules. Produces a ValidationReport that gates Phase 03.
+Validates all CSV input files against JSON Schema rules, checks referential
+integrity across CSV files, enforces data-type contracts, and emits a
+structured ValidationReport with CRITICAL / WARNING / INFO severities.
 
-Rule categories:
-  CAT-1  Schema validation        Field types, formats, allowed enum values
-  CAT-2  Completeness checks      Required fields populated for each entity type
-  CAT-3  Business rules           Tableau-specific constraints (formula syntax, etc.)
-  CAT-4  Cross-file consistency   Relationships reference real columns, etc.
-  CAT-5  Performance warnings     Large column counts, complex LOD chains
-  CAT-6  Security checks          Credential env vars referenced but not set
-
-Severity model (mirrors test framework Section 7):
-  CRITICAL → blocks Phase 03 (orchestrator will not proceed)
-  HIGH     → blocks with human override
-  MEDIUM   → warning only, workflow continues
-  INFO     → informational
-
-Output (written to WorkbookState):
-  - validation_report: ValidationReport.to_dict()
-
-Gate condition for Phase 03:
-  validation_report["can_proceed"] == True
+Failure policy:
+  CRITICAL  → blocks DAG progression (0 allowed to advance)
+  WARNING   → logged, workflow continues
+  INFO      → informational annotations only
 """
 
 from __future__ import annotations
 
-import os
 import re
-from typing import Any, Dict, List, Optional
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+import pandas as pd
 import structlog
 
-from agents.base_agent import (
-    AgentResult,
-    AgentStatus,
-    BaseAgent,
-    ErrorSeverity,
-    PhaseContext,
-)
-from models.project_spec import (
-    DashboardRequirement,
-    MetricConfig,
-    ProjectSpec,
-)
-from models.validation_report import (
-    FindingCategory,
-    FindingSeverity,
-    ValidationReport,
-)
+from agents.base_agent import AgentResult, BaseAgent
+
+logger = structlog.get_logger()
+
+# ---------------------------------------------------------------------------
+# Domain types
+# ---------------------------------------------------------------------------
 
 
-logger = structlog.get_logger().bind(agent="validation_agent")
+class Severity(str, Enum):
+    CRITICAL = "CRITICAL"
+    WARNING = "WARNING"
+    INFO = "INFO"
 
-# ── Constants ──────────────────────────────────────────────────────────────────
 
-# Tableau chart types that are valid mark classes
-VALID_CHART_TYPES = {
-    "Bar", "Line", "Area", "Circle", "Square", "Automatic",
-    "Text", "Pie", "Shape", "Map", "Scatter", "Gantt",
+@dataclass
+class ValidationIssue:
+    severity: Severity
+    rule: str
+    file: str
+    column: Optional[str]
+    row_index: Optional[int]
+    message: str
+    value: Optional[Any] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "severity": self.severity.value,
+            "rule": self.rule,
+            "file": self.file,
+            "column": self.column,
+            "row_index": self.row_index,
+            "message": self.message,
+            "value": str(self.value) if self.value is not None else None,
+        }
+
+
+@dataclass
+class ValidationReport:
+    project_id: str
+    issues: List[ValidationIssue] = field(default_factory=list)
+    files_checked: List[str] = field(default_factory=list)
+    duration_ms: float = 0.0
+
+    # ── convenience accessors ──────────────────────────────────────────────
+    @property
+    def criticals(self) -> List[ValidationIssue]:
+        return [i for i in self.issues if i.severity == Severity.CRITICAL]
+
+    @property
+    def warnings(self) -> List[ValidationIssue]:
+        return [i for i in self.issues if i.severity == Severity.WARNING]
+
+    @property
+    def infos(self) -> List[ValidationIssue]:
+        return [i for i in self.issues if i.severity == Severity.INFO]
+
+    @property
+    def is_valid(self) -> bool:
+        """True only when zero CRITICAL issues exist."""
+        return len(self.criticals) == 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "is_valid": self.is_valid,
+            "summary": {
+                "critical": len(self.criticals),
+                "warning": len(self.warnings),
+                "info": len(self.infos),
+                "total": len(self.issues),
+            },
+            "files_checked": self.files_checked,
+            "duration_ms": round(self.duration_ms, 2),
+            "issues": [i.to_dict() for i in self.issues],
+        }
+
+
+# ---------------------------------------------------------------------------
+# Per-file schemas: (column_name, dtype_hint, required)
+# dtype_hint: "string" | "boolean" | "integer" | "float" | "enum:<v1,v2,...>"
+# ---------------------------------------------------------------------------
+
+FILE_SCHEMAS: Dict[str, List[Tuple[str, str, bool]]] = {
+    "project_config.csv": [
+        ("project_id", "string", True),
+        ("project_name", "string", True),
+        ("environment", "enum:dev,staging,prod", True),
+        ("tableau_site", "string", True),
+        ("tableau_server_url", "string", True),
+        ("target_project", "string", True),
+        ("workbook_name", "string", True),
+        ("tableau_version", "string", False),
+        ("figma_file_id", "string", False),
+        ("enable_extract", "boolean", False),
+        ("description", "string", False),
+    ],
+    "data_sources.csv": [
+        ("datasource_id", "string", True),
+        ("datasource_name", "string", True),
+        ("connection_id", "string", True),
+        ("datasource_type", "enum:live,extract,published", True),
+        ("published_ds_name", "string", False),
+        ("default_schema", "string", False),
+        ("primary_table", "string", True),
+        ("is_primary", "boolean", False),
+    ],
+    "connections.csv": [
+        ("connection_id", "string", True),
+        ("class", "enum:snowflake,postgres,mysql,excel-direct,sqlserver,redshift", True),
+        ("server", "string", True),
+        ("dbname", "string", True),
+        ("schema", "string", True),
+        ("warehouse", "string", False),
+        ("port", "integer", False),
+        ("role", "string", False),
+        ("auth_method", "enum:Username Password,OAuth,Key-pair", True),
+        ("auth_id", "string", True),
+    ],
+    "auth.csv": [
+        ("auth_id", "string", True),
+        ("username_env", "string", True),
+        ("password_env", "string", True),
+        ("pat_name_env", "string", False),
+        ("pat_secret_env", "string", False),
+        ("oauth_token_env", "string", False),
+        ("description", "string", False),
+    ],
+    "tables.csv": [
+        ("table_id", "string", True),
+        ("datasource_id", "string", True),
+        ("table_name", "string", True),
+        ("schema", "string", False),
+        ("alias", "string", False),
+        ("is_custom_sql", "boolean", False),
+        ("custom_sql", "string", False),
+    ],
+    "columns.csv": [
+        ("column_id", "string", True),
+        ("table_id", "string", True),
+        ("column_name", "string", True),
+        ("display_name", "string", False),
+        ("datatype", "enum:string,integer,real,date,datetime,boolean", True),
+        ("role", "enum:dimension,measure", True),
+        ("aggregation", "enum:Sum,Avg,Count,Min,Max,CountD", False),
+        ("description", "string", False),
+        ("hidden", "boolean", False),
+        ("group", "string", False),
+    ],
+    "relationships.csv": [
+        ("relationship_id", "string", True),
+        ("datasource_id", "string", True),
+        ("left_table_id", "string", True),
+        ("right_table_id", "string", True),
+        ("left_key", "string", True),
+        ("right_key", "string", True),
+        ("join_type", "enum:inner,left,right,full", True),
+        ("relationship_type", "enum:join,relationship", False),
+    ],
+    "metrics.csv": [
+        ("metric_id", "string", True),
+        ("datasource_id", "string", True),
+        ("metric_name", "string", True),
+        ("formula", "string", True),
+        ("datatype", "enum:string,integer,real,date,datetime,boolean", True),
+        ("format_string", "string", False),
+        ("description", "string", False),
+        ("is_lod", "boolean", False),
+        ("calculation_id", "string", False),
+    ],
+    "dimensions.csv": [
+        ("dimension_id", "string", True),
+        ("datasource_id", "string", True),
+        ("dimension_name", "string", True),
+        ("dimension_type", "enum:hierarchy,group,set,calc", True),
+        ("columns", "string", True),
+        ("description", "string", False),
+    ],
+    "dashboard_requirements.csv": [
+        ("view_id", "string", True),
+        ("view_name", "string", True),
+        ("view_type", "enum:worksheet,dashboard", True),
+        ("datasource_id", "string", True),
+        ("chart_type", "enum:Bar,Line,Pie,Text,Map,Scatter,Area,Shape,Circle,Square,Automatic", True),
+        ("rows", "string", False),
+        ("columns", "string", False),
+        ("color", "string", False),
+        ("size", "string", False),
+        ("label", "string", False),
+        ("filter_fields", "string", False),
+        ("sort_by", "string", False),
+        ("sort_direction", "enum:asc,desc", False),
+        ("dashboard_id", "string", False),
+        ("dashboard_layout", "enum:grid-2x2,grid-3x2,grid-2x3,horizontal,vertical,freeform", False),
+        ("views_in_dashboard", "string", False),
+        ("width_px", "integer", False),
+        ("height_px", "integer", False),
+    ],
+    "figma_layout.csv": [
+        ("element_id", "string", True),
+        ("element_type", "enum:color,font,zone,spacing,component", True),
+        ("name", "string", True),
+        ("value", "string", True),
+        ("category", "string", False),
+        ("zone_view_id", "string", False),
+        ("x_px", "integer", False),
+        ("y_px", "integer", False),
+        ("w_px", "integer", False),
+        ("h_px", "integer", False),
+    ],
 }
 
-# Valid Tableau field data types
-VALID_DATATYPES = {"string", "integer", "real", "date", "datetime", "boolean"}
+# ---------------------------------------------------------------------------
+# FK integrity rules: (child_file, child_col, parent_file, parent_col, severity)
+# ---------------------------------------------------------------------------
 
-# Valid Tableau field roles
-VALID_ROLES = {"dimension", "measure"}
+FK_RULES: List[Tuple[str, str, str, str, Severity]] = [
+    ("data_sources.csv", "connection_id", "connections.csv", "connection_id", Severity.CRITICAL),
+    ("tables.csv", "datasource_id", "data_sources.csv", "datasource_id", Severity.CRITICAL),
+    ("columns.csv", "table_id", "tables.csv", "table_id", Severity.CRITICAL),
+    ("relationships.csv", "datasource_id", "data_sources.csv", "datasource_id", Severity.CRITICAL),
+    ("relationships.csv", "left_table_id", "tables.csv", "table_id", Severity.CRITICAL),
+    ("relationships.csv", "right_table_id", "tables.csv", "table_id", Severity.CRITICAL),
+    ("metrics.csv", "datasource_id", "data_sources.csv", "datasource_id", Severity.CRITICAL),
+    ("dimensions.csv", "datasource_id", "data_sources.csv", "datasource_id", Severity.CRITICAL),
+    ("dashboard_requirements.csv", "datasource_id", "data_sources.csv", "datasource_id", Severity.CRITICAL),
+    ("connections.csv", "auth_id", "auth.csv", "auth_id", Severity.CRITICAL),
+    # Soft FK: figma zone → dashboard_requirements view_id
+    ("figma_layout.csv", "zone_view_id", "dashboard_requirements.csv", "view_id", Severity.WARNING),
+]
 
-# Valid dashboard layout templates
-VALID_LAYOUTS = {
-    "grid-2x2", "grid-2x3", "grid-3x2", "grid-3x3",
-    "horizontal", "vertical", "floating", "blank",
+# ---------------------------------------------------------------------------
+# Business rule validators
+# ---------------------------------------------------------------------------
+
+_HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")
+_URL_RE = re.compile(r"^https?://")
+_TABLEAU_FORMULA_BRACKETS_RE = re.compile(r"\[.*?\]")
+_LOD_RE = re.compile(r"\{.*?(FIXED|INCLUDE|EXCLUDE).*?\}", re.IGNORECASE | re.DOTALL)
+
+
+def _check_hex_colors(df: pd.DataFrame, file_name: str) -> List[ValidationIssue]:
+    """Figma color tokens must be valid hex codes."""
+    issues: List[ValidationIssue] = []
+    if file_name != "figma_layout.csv":
+        return issues
+    color_rows = df[df["element_type"].str.lower() == "color"] if "element_type" in df.columns else pd.DataFrame()
+    for idx, row in color_rows.iterrows():
+        val = str(row.get("value", "")).strip()
+        if val and not _HEX_COLOR_RE.match(val):
+            issues.append(ValidationIssue(
+                severity=Severity.WARNING,
+                rule="figma_color_hex_format",
+                file=file_name,
+                column="value",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=f"Color token '{row.get('name')}' has invalid hex value '{val}'. Expected #RRGGBB.",
+                value=val,
+            ))
+    return issues
+
+
+def _check_tableau_server_url(df: pd.DataFrame, file_name: str) -> List[ValidationIssue]:
+    """project_config.tableau_server_url must start with https://"""
+    issues: List[ValidationIssue] = []
+    if file_name != "project_config.csv" or "tableau_server_url" not in df.columns:
+        return issues
+    for idx, row in df.iterrows():
+        url = str(row.get("tableau_server_url", "")).strip()
+        if url and not _URL_RE.match(url):
+            issues.append(ValidationIssue(
+                severity=Severity.CRITICAL,
+                rule="tableau_server_url_format",
+                file=file_name,
+                column="tableau_server_url",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=f"tableau_server_url '{url}' must start with https://",
+                value=url,
+            ))
+    return issues
+
+
+def _check_metric_formula_brackets(df: pd.DataFrame, file_name: str) -> List[ValidationIssue]:
+    """Tableau formulas must contain at least one [FieldName] reference."""
+    issues: List[ValidationIssue] = []
+    if file_name != "metrics.csv" or "formula" not in df.columns:
+        return issues
+    for idx, row in df.iterrows():
+        formula = str(row.get("formula", "")).strip()
+        if formula and not _TABLEAU_FORMULA_BRACKETS_RE.search(formula):
+            issues.append(ValidationIssue(
+                severity=Severity.WARNING,
+                rule="metric_formula_no_field_ref",
+                file=file_name,
+                column="formula",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=(
+                    f"Metric '{row.get('metric_name')}' formula '{formula}' contains no "
+                    "[FieldName] references. Verify this is intentional."
+                ),
+                value=formula,
+            ))
+    return issues
+
+
+def _check_lod_flag_consistency(df: pd.DataFrame, file_name: str) -> List[ValidationIssue]:
+    """If formula contains LOD syntax, is_lod should be true."""
+    issues: List[ValidationIssue] = []
+    if file_name != "metrics.csv":
+        return issues
+    if "formula" not in df.columns or "is_lod" not in df.columns:
+        return issues
+    for idx, row in df.iterrows():
+        formula = str(row.get("formula", "")).strip()
+        is_lod_val = str(row.get("is_lod", "false")).strip().lower()
+        has_lod = bool(_LOD_RE.search(formula))
+        is_lod_flag = is_lod_val in ("true", "1", "yes")
+        if has_lod and not is_lod_flag:
+            issues.append(ValidationIssue(
+                severity=Severity.WARNING,
+                rule="lod_flag_mismatch",
+                file=file_name,
+                column="is_lod",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=(
+                    f"Metric '{row.get('metric_name')}' formula contains LOD syntax but "
+                    "is_lod=false. Set is_lod=true."
+                ),
+                value=formula,
+            ))
+        if not has_lod and is_lod_flag:
+            issues.append(ValidationIssue(
+                severity=Severity.INFO,
+                rule="lod_flag_mismatch",
+                file=file_name,
+                column="is_lod",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=(
+                    f"Metric '{row.get('metric_name')}' is_lod=true but formula has no "
+                    "LOD syntax. Verify formula."
+                ),
+                value=formula,
+            ))
+    return issues
+
+
+def _check_dashboard_has_worksheets(
+    dash_df: pd.DataFrame, req_df: pd.DataFrame, file_name: str
+) -> List[ValidationIssue]:
+    """Each dashboard must reference at least one worksheet in views_in_dashboard."""
+    issues: List[ValidationIssue] = []
+    if "view_type" not in dash_df.columns:
+        return issues
+    dashboards = dash_df[dash_df["view_type"].str.lower() == "dashboard"]
+    worksheet_ids: set = set()
+    if "view_id" in req_df.columns and "view_type" in req_df.columns:
+        ws_rows = req_df[req_df["view_type"].str.lower() == "worksheet"]
+        worksheet_ids = set(ws_rows["view_id"].dropna().astype(str))
+
+    for idx, row in dashboards.iterrows():
+        views_raw = str(row.get("views_in_dashboard", "")).strip()
+        if not views_raw:
+            issues.append(ValidationIssue(
+                severity=Severity.CRITICAL,
+                rule="dashboard_missing_worksheets",
+                file=file_name,
+                column="views_in_dashboard",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=f"Dashboard '{row.get('view_name')}' has no views_in_dashboard.",
+                value=None,
+            ))
+            continue
+        referenced = {v.strip() for v in views_raw.split("|") if v.strip()}
+        orphans = referenced - worksheet_ids
+        for orphan in orphans:
+            issues.append(ValidationIssue(
+                severity=Severity.CRITICAL,
+                rule="dashboard_orphan_worksheet_ref",
+                file=file_name,
+                column="views_in_dashboard",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=(
+                    f"Dashboard '{row.get('view_name')}' references worksheet "
+                    f"'{orphan}' which does not exist in dashboard_requirements.csv."
+                ),
+                value=orphan,
+            ))
+    return issues
+
+
+def _check_duplicate_ids(df: pd.DataFrame, file_name: str, id_col: str) -> List[ValidationIssue]:
+    """Primary key column must be unique within the file."""
+    issues: List[ValidationIssue] = []
+    if id_col not in df.columns:
+        return issues
+    dupes = df[df.duplicated(subset=[id_col], keep=False)]
+    seen: set = set()
+    for idx, row in dupes.iterrows():
+        val = str(row[id_col])
+        if val not in seen:
+            seen.add(val)
+            issues.append(ValidationIssue(
+                severity=Severity.CRITICAL,
+                rule="duplicate_primary_key",
+                file=file_name,
+                column=id_col,
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=f"Duplicate ID '{val}' in column '{id_col}'.",
+                value=val,
+            ))
+    return issues
+
+
+def _check_snowflake_warehouse_required(df: pd.DataFrame, file_name: str) -> List[ValidationIssue]:
+    """Snowflake connections must specify a warehouse."""
+    issues: List[ValidationIssue] = []
+    if file_name != "connections.csv":
+        return issues
+    if "class" not in df.columns or "warehouse" not in df.columns:
+        return issues
+    sf_rows = df[df["class"].str.lower() == "snowflake"]
+    for idx, row in sf_rows.iterrows():
+        wh = str(row.get("warehouse", "")).strip()
+        if not wh or wh.lower() in ("nan", "none", ""):
+            issues.append(ValidationIssue(
+                severity=Severity.WARNING,
+                rule="snowflake_warehouse_missing",
+                file=file_name,
+                column="warehouse",
+                row_index=int(idx),  # type: ignore[arg-type]
+                message=(
+                    f"Snowflake connection '{row.get('connection_id')}' has no warehouse. "
+                    "Tableau will use the account default — confirm this is intentional."
+                ),
+                value=None,
+            ))
+    return issues
+
+
+def _check_auth_credential_format(df: pd.DataFrame, file_name: str) -> List[ValidationIssue]:
+    """Warn if env var names contain spaces or look like actual secret values."""
+    issues: List[ValidationIssue] = []
+    if file_name != "auth.csv":
+        return issues
+    env_cols = ["username_env", "password_env", "pat_name_env", "pat_secret_env", "oauth_token_env"]
+    # Patterns that look like actual secrets, not env var names
+    _looks_like_secret_re = re.compile(r"^(sk-|xoxb-|xoxp-|ya29\.|ey[A-Z])", re.IGNORECASE)
+    for col in env_cols:
+        if col not in df.columns:
+            continue
+        for idx, row in df.iterrows():
+            val = str(row.get(col, "")).strip()
+            if not val or val.lower() in ("nan", "none", ""):
+                continue
+            if " " in val:
+                issues.append(ValidationIssue(
+                    severity=Severity.CRITICAL,
+                    rule="auth_env_var_has_spaces",
+                    file=file_name,
+                    column=col,
+                    row_index=int(idx),  # type: ignore[arg-type]
+                    message=f"Column '{col}' value '{val}' contains spaces. Must be an env var name.",
+                    value=val,
+                ))
+            elif _looks_like_secret_re.match(val):
+                issues.append(ValidationIssue(
+                    severity=Severity.CRITICAL,
+                    rule="auth_secret_in_csv",
+                    file=file_name,
+                    column=col,
+                    row_index=int(idx),  # type: ignore[arg-type]
+                    message=(
+                        f"Column '{col}' value appears to be an actual secret token, "
+                        "not an environment variable name. Never store secrets in CSV!"
+                    ),
+                    value="<redacted>",
+                ))
+    return issues
+
+
+def _check_dashboard_dimension_requirements(
+    req_df: pd.DataFrame, file_name: str
+) -> List[ValidationIssue]:
+    """Chart-type specific field requirements."""
+    issues: List[ValidationIssue] = []
+    if file_name != "dashboard_requirements.csv":
+        return issues
+    chart_rules: Dict[str, Dict[str, List[str]]] = {
+        "Pie": {"required_any": ["color"], "desc": "Pie charts need a 'color' (segment) field."},
+        "Map": {"required_any": ["rows", "columns"], "desc": "Map charts need geographic rows or columns."},
+        "Scatter": {"required_all": ["rows", "columns"], "desc": "Scatter charts need both rows and columns."},
+    }
+    for idx, row in req_df.iterrows():
+        chart = str(row.get("chart_type", "")).strip()
+        if chart not in chart_rules:
+            continue
+        rule = chart_rules[chart]
+        desc = rule["desc"]
+        if "required_any" in rule:
+            for f in rule["required_any"]:
+                val = str(row.get(f, "")).strip()
+                if not val or val.lower() in ("nan", "none", ""):
+                    issues.append(ValidationIssue(
+                        severity=Severity.WARNING,
+                        rule="chart_type_field_requirement",
+                        file=file_name,
+                        column=f,
+                        row_index=int(idx),  # type: ignore[arg-type]
+                        message=f"Worksheet '{row.get('view_name')}': {desc}",
+                        value=chart,
+                    ))
+        if "required_all" in rule:
+            missing = [
+                f for f in rule["required_all"]
+                if not str(row.get(f, "")).strip() or str(row.get(f, "")).strip().lower() in ("nan", "none")
+            ]
+            for f in missing:
+                issues.append(ValidationIssue(
+                    severity=Severity.WARNING,
+                    rule="chart_type_field_requirement",
+                    file=file_name,
+                    column=f,
+                    row_index=int(idx),  # type: ignore[arg-type]
+                    message=f"Worksheet '{row.get('view_name')}': {desc}",
+                    value=chart,
+                ))
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Primary key map (file → pk column)
+# ---------------------------------------------------------------------------
+_PK_MAP: Dict[str, str] = {
+    "project_config.csv": "project_id",
+    "data_sources.csv": "datasource_id",
+    "connections.csv": "connection_id",
+    "auth.csv": "auth_id",
+    "tables.csv": "table_id",
+    "columns.csv": "column_id",
+    "relationships.csv": "relationship_id",
+    "metrics.csv": "metric_id",
+    "dimensions.csv": "dimension_id",
+    "dashboard_requirements.csv": "view_id",
+    "figma_layout.csv": "element_id",
 }
 
-# Tableau formula function names for basic syntax checking
-TABLEAU_AGGREGATIONS = {"SUM", "AVG", "COUNT", "COUNTD", "MIN", "MAX",
-                        "MEDIAN", "STDEV", "VAR", "ATTR", "TOTAL"}
-TABLEAU_LOD_KEYWORDS = {"FIXED", "INCLUDE", "EXCLUDE"}
-TABLEAU_TABLE_CALCS   = {"RUNNING_SUM", "RUNNING_AVG", "WINDOW_SUM",
-                         "WINDOW_AVG", "RANK", "RANK_DENSE", "FIRST", "LAST",
-                         "INDEX", "SIZE"}
 
-# Performance thresholds
-MAX_COLUMNS_PER_DATASOURCE  = 200    # warn above this
-MAX_METRICS_PER_DATASOURCE  = 50     # warn above this
-MAX_WORKSHEETS_PER_DASHBOARD = 16    # warn above this
+# ---------------------------------------------------------------------------
+# MetadataValidationAgent
+# ---------------------------------------------------------------------------
 
-
-# ── ValidationAgent ────────────────────────────────────────────────────────────
-
-class ValidationAgent(BaseAgent):
+class MetadataValidationAgent(BaseAgent):
     """
-    Phase 02 — Metadata Validation
+    Agent #03 — Metadata Validation
 
-    Validates the ProjectSpec from IntakeAgent using 6 rule categories.
-    Produces a ValidationReport that the orchestrator uses to gate Phase 03.
+    Validates all CSV input files for:
+    - File presence
+    - Required column presence
+    - Data type compliance
+    - Enum value constraints
+    - Primary key uniqueness
+    - Referential integrity (FK rules)
+    - Business logic rules (URL format, color hex, formula syntax, etc.)
     """
 
-    def __init__(
-        self,
-        config: Optional[Dict[str, Any]] = None,
-        context: Optional[PhaseContext] = None,
-    ) -> None:
-        super().__init__(
-            agent_id="validation_agent",
-            phase="VALIDATING",
-            config=config or {},
-            context=context,
-        )
+    AGENT_ID = "metadata_validation"
+    PHASE = "VALIDATING"
 
-    # ── validate_input ─────────────────────────────────────────────────────
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(self.AGENT_ID, config or {})
+        self._csv_dir: Optional[Path] = None
+
+    # ── BaseAgent contract ─────────────────────────────────────────────────
 
     def validate_input(self, state: Dict[str, Any]) -> List[str]:
-        """Require project_spec from IntakeAgent output."""
-        if not state.get("project_spec"):
-            return [
-                "project_spec not found in state. "
-                "Run IntakeAgent (Phase 01) before ValidationAgent."
-            ]
-        return []
-
-    # ── run ────────────────────────────────────────────────────────────────
+        errors: List[str] = []
+        project_spec = state.get("project_spec")
+        if not project_spec:
+            errors.append("'project_spec' is missing from workflow state.")
+        csv_dir = state.get("csv_dir") or self.config.get("csv_dir")
+        if not csv_dir:
+            errors.append("'csv_dir' must be present in state or agent config.")
+        return errors
 
     def run(self, state: Dict[str, Any]) -> AgentResult:
-        self.log_start()
-        result = AgentResult(agent_id=self.agent_id, phase=self.phase)
+        start = time.monotonic()
+        self.log_start(self.PHASE)
 
-        # Reconstruct ProjectSpec from state dict — catch Pydantic validation errors
-        # and surface them as CRITICAL findings so the report is still produced.
-        spec = None
-        try:
-            spec = ProjectSpec.model_validate(state["project_spec"])
-        except Exception as e:
-            # Pydantic ValidationError or other construction error
-            report = ValidationReport(
-                project_id=state["project_spec"].get("project_config", {}).get(
-                    "project_id", ""
-                ),
-                run_id=self.context.run_id if self.context else "",
+        pre_errors = self.validate_input(state)
+        if pre_errors:
+            result = AgentResult(
+                agent_id=self.AGENT_ID,
+                phase=self.PHASE,
+                status="failed",
+                errors=pre_errors,
+                duration_ms=(time.monotonic() - start) * 1000,
             )
-            # Try to extract per-field errors from Pydantic's error list
-            try:
-                from pydantic import ValidationError as PydanticValidationError
-                if isinstance(e, PydanticValidationError):
-                    for err in e.errors():
-                        loc  = " → ".join(str(x) for x in err["loc"])
-                        msg  = err["msg"]
-                        val  = str(err.get("input", ""))
-                        report.add_critical(
-                            "project_spec",
-                            f"Schema error at {loc}: {msg} (value: {val!r})",
-                            rule="CAT1.pydantic_schema",
-                            field=loc,
-                            value=val,
-                        )
-                else:
-                    report.add_critical(
-                        "project_spec",
-                        f"Cannot reconstruct ProjectSpec from state: {e}",
-                        rule="CAT1.pydantic_schema",
-                    )
-            except Exception:
-                report.add_critical(
-                    "project_spec",
-                    f"Cannot reconstruct ProjectSpec from state: {e}",
-                    rule="CAT1.pydantic_schema",
-                )
+            self.log_complete(result)
+            return result
 
-            report.rules_run = ["CAT1"]  # partial run
-            result.output = {"validation_report": report.to_dict()}
-            result.metadata["validation_summary"] = report.summary()
-            # Add to agent result so orchestrator sees it
-            result.add_error(
-                f"ProjectSpec construction failed: {e}",
-                severity=ErrorSeverity.CRITICAL,
-                exc=e,
-            )
-            return self.log_complete(result)
+        csv_dir = Path(state.get("csv_dir") or self.config.get("csv_dir", "csv_inputs"))
+        project_spec = state.get("project_spec", {})
+        project_id = project_spec.get("project_id", "unknown")
 
-        # Build ValidationReport
-        report = ValidationReport(
-            project_id=spec.project_config.project_id,
-            run_id=self.context.run_id if self.context else "",
+        report = self._run_validation(csv_dir, project_id)
+        report.duration_ms = (time.monotonic() - start) * 1000
+
+        status = "success" if report.is_valid else "failed"
+        result = AgentResult(
+            agent_id=self.AGENT_ID,
+            phase=self.PHASE,
+            status=status,
+            output={"validation_report": report.to_dict()},
+            errors=[i.message for i in report.criticals],
+            warnings=[i.message for i in report.warnings],
+            duration_ms=report.duration_ms,
         )
+        self.log_complete(result)
+        return result
 
-        # Run all 6 rule categories
-        self._cat1_schema_validation(spec, report)
-        self._cat2_completeness_checks(spec, report)
-        self._cat3_business_rules(spec, report)
-        self._cat4_cross_file_consistency(spec, report)
-        self._cat5_performance_warnings(spec, report)
-        self._cat6_security_checks(spec, report)
+    # ── Orchestration entry-point (LangGraph node signature) ──────────────
 
-        # Write output
-        result.output = {"validation_report": report.to_dict()}
-        result.metadata["validation_summary"] = report.summary()
+    def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """LangGraph node wrapper — returns state delta."""
+        result = self.run(state)
+        return {
+            "validation_report": result.output.get("validation_report", {}),
+            "errors": result.errors,
+            "phase": self.PHASE if result.status == "success" else "FAILED",
+        }
 
-        # Set agent status based on report
-        if report.can_proceed:
-            result.status = (AgentStatus.WARNING
-                             if report.warning_count > 0
-                             else AgentStatus.SUCCESS)
-        else:
-            # Add blocking findings as agent errors for orchestrator visibility
-            for f in report.findings:
-                if f.is_blocking:
-                    result.add_error(
-                        f"[{f.rule}] {f.source}: {f.message}",
-                        severity=(ErrorSeverity.CRITICAL
-                                  if f.severity == FindingSeverity.CRITICAL
-                                  else ErrorSeverity.HIGH),
-                        field=f.field,
-                    )
+    # ── Internal validation pipeline ──────────────────────────────────────
+
+    def _run_validation(self, csv_dir: Path, project_id: str) -> ValidationReport:
+        report = ValidationReport(project_id=project_id)
+        dataframes: Dict[str, pd.DataFrame] = {}
+
+        # 1. Load & validate each expected file
+        for file_name, schema_def in FILE_SCHEMAS.items():
+            path = csv_dir / file_name
+            if not path.exists():
+                # Non-critical files: WARNING; core files: CRITICAL
+                core_files = {
+                    "project_config.csv", "data_sources.csv", "connections.csv",
+                    "auth.csv", "tables.csv", "columns.csv", "dashboard_requirements.csv",
+                }
+                sev = Severity.CRITICAL if file_name in core_files else Severity.WARNING
+                report.issues.append(ValidationIssue(
+                    severity=sev,
+                    rule="file_missing",
+                    file=file_name,
+                    column=None,
+                    row_index=None,
+                    message=f"Required file '{file_name}' not found in '{csv_dir}'.",
+                ))
+                continue
+
+            # Load
+            try:
+                df = pd.read_csv(path, dtype=str, keep_default_na=False)
+                # Normalise column names
+                df.columns = [c.strip().lower() for c in df.columns]
+            except Exception as exc:
+                report.issues.append(ValidationIssue(
+                    severity=Severity.CRITICAL,
+                    rule="file_parse_error",
+                    file=file_name,
+                    column=None,
+                    row_index=None,
+                    message=f"Failed to parse '{file_name}': {exc}",
+                ))
+                continue
+
+            dataframes[file_name] = df
+            report.files_checked.append(file_name)
+
+            # 2. Empty file check
+            if df.empty:
+                report.issues.append(ValidationIssue(
+                    severity=Severity.WARNING,
+                    rule="file_empty",
+                    file=file_name,
+                    column=None,
+                    row_index=None,
+                    message=f"File '{file_name}' is empty (0 data rows).",
+                ))
+
+            # 3. Column presence
+            for col_name, dtype_hint, required in schema_def:
+                col_lower = col_name.lower()
+                if col_lower not in df.columns:
+                    sev = Severity.CRITICAL if required else Severity.INFO
+                    report.issues.append(ValidationIssue(
+                        severity=sev,
+                        rule="column_missing",
+                        file=file_name,
+                        column=col_name,
+                        row_index=None,
+                        message=f"Column '{col_name}' missing from '{file_name}'.",
+                    ))
+                    continue
+
+                # 4. Required field: no blanks
+                if required:
+                    blank_mask = df[col_lower].str.strip().eq("") | df[col_lower].str.lower().isin(["nan", "none"])
+                    for idx in df[blank_mask].index:
+                        report.issues.append(ValidationIssue(
+                            severity=Severity.CRITICAL,
+                            rule="required_field_blank",
+                            file=file_name,
+                            column=col_name,
+                            row_index=int(idx),  # type: ignore[arg-type]
+                            message=f"Required column '{col_name}' is blank at row {idx}.",
+                        ))
+
+                # 5. Enum validation
+                if dtype_hint.startswith("enum:") and col_lower in df.columns:
+                    allowed = {v.strip().lower() for v in dtype_hint[5:].split(",")}
+                    for idx, row in df.iterrows():
+                        val = str(row[col_lower]).strip()
+                        if val and val.lower() not in ("nan", "none", "") and val.lower() not in allowed:
+                            report.issues.append(ValidationIssue(
+                                severity=Severity.CRITICAL,
+                                rule="enum_value_invalid",
+                                file=file_name,
+                                column=col_name,
+                                row_index=int(idx),  # type: ignore[arg-type]
+                                message=(
+                                    f"Invalid value '{val}' for '{col_name}'. "
+                                    f"Allowed: {sorted(allowed)}"
+                                ),
+                                value=val,
+                            ))
+
+                # 6. Integer type check
+                if dtype_hint == "integer" and col_lower in df.columns:
+                    for idx, row in df.iterrows():
+                        val = str(row[col_lower]).strip()
+                        if val and val.lower() not in ("nan", "none", ""):
+                            try:
+                                int(float(val))
+                            except (ValueError, OverflowError):
+                                report.issues.append(ValidationIssue(
+                                    severity=Severity.WARNING,
+                                    rule="type_mismatch_integer",
+                                    file=file_name,
+                                    column=col_name,
+                                    row_index=int(idx),  # type: ignore[arg-type]
+                                    message=f"Column '{col_name}' expects integer, got '{val}'.",
+                                    value=val,
+                                ))
+
+                # 7. Boolean type check
+                if dtype_hint == "boolean" and col_lower in df.columns:
+                    valid_bools = {"true", "false", "1", "0", "yes", "no", "nan", "none", ""}
+                    for idx, row in df.iterrows():
+                        val = str(row[col_lower]).strip().lower()
+                        if val not in valid_bools:
+                            report.issues.append(ValidationIssue(
+                                severity=Severity.WARNING,
+                                rule="type_mismatch_boolean",
+                                file=file_name,
+                                column=col_name,
+                                row_index=int(idx),  # type: ignore[arg-type]
+                                message=f"Column '{col_name}' expects boolean, got '{val}'.",
+                                value=val,
+                            ))
+
+            # 8. Duplicate primary key check
+            pk_col = _PK_MAP.get(file_name)
+            if pk_col and pk_col.lower() in df.columns:
+                report.issues.extend(_check_duplicate_ids(df, file_name, pk_col.lower()))
+
+            # 9. Business rule checks per file
+            report.issues.extend(_check_hex_colors(df, file_name))
+            report.issues.extend(_check_tableau_server_url(df, file_name))
+            report.issues.extend(_check_metric_formula_brackets(df, file_name))
+            report.issues.extend(_check_lod_flag_consistency(df, file_name))
+            report.issues.extend(_check_snowflake_warehouse_required(df, file_name))
+            report.issues.extend(_check_auth_credential_format(df, file_name))
+            report.issues.extend(_check_dashboard_dimension_requirements(df, file_name))
+
+        # 10. Cross-file checks
+        # Dashboard → worksheet referential check
+        if "dashboard_requirements.csv" in dataframes:
+            dr = dataframes["dashboard_requirements.csv"]
+            report.issues.extend(
+                _check_dashboard_has_worksheets(dr, dr, "dashboard_requirements.csv")
+            )
+
+        # 11. FK referential integrity
+        for child_file, child_col, parent_file, parent_col, severity in FK_RULES:
+            child_df = dataframes.get(child_file)
+            parent_df = dataframes.get(parent_file)
+            if child_df is None or parent_df is None:
+                continue
+            c_col = child_col.lower()
+            p_col = parent_col.lower()
+            if c_col not in child_df.columns or p_col not in parent_df.columns:
+                continue
+            parent_ids: set = set(
+                parent_df[p_col].str.strip().dropna().tolist()
+            )
+            for idx, row in child_df.iterrows():
+                val = str(row[c_col]).strip()
+                if val and val.lower() not in ("nan", "none", "") and val not in parent_ids:
+                    report.issues.append(ValidationIssue(
+                        severity=severity,
+                        rule="referential_integrity",
+                        file=child_file,
+                        column=child_col,
+                        row_index=int(idx),  # type: ignore[arg-type]
+                        message=(
+                            f"FK violation: '{child_file}'.{child_col}='{val}' "
+                            f"not found in '{parent_file}'.{parent_col}."
+                        ),
+                        value=val,
+                    ))
+
+        # 12. INFO: project-level completeness hints
+        self._emit_completeness_hints(dataframes, report)
 
         self.logger.info(
             "validation_complete",
-            **report.summary(),
+            project_id=project_id,
+            critical=len(report.criticals),
+            warning=len(report.warnings),
+            info=len(report.infos),
+            files_checked=len(report.files_checked),
         )
+        return report
 
-        return self.log_complete(result)
+    # ── Completeness hints ─────────────────────────────────────────────────
 
-    # ══════════════════════════════════════════════════════════════════════
-    # CAT-1: Schema validation
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _cat1_schema_validation(
-        self, spec: ProjectSpec, report: ValidationReport
-    ) -> None:
-        """Validate field types, formats, and allowed enum values."""
-        rule_base = "CAT1"
-        report.rules_run.append(rule_base)
-
-        # project_config: environment values
-        env = spec.project_config.environment
-        if env not in {"dev", "staging", "prod"}:
-            report.add_critical(
-                "project_config.csv", f"Invalid environment '{env}'",
-                rule=f"{rule_base}.environment",
-                field="environment",
-                suggestion="Set environment to: dev, staging, or prod",
-            )
-
-        # project_config: URL format — must use https for Tableau Cloud
-        url = spec.project_config.tableau_server_url
-        if url.startswith("http://"):
-            report.add_finding(
-                "project_config.csv",
-                f"tableau_server_url uses http:// instead of https://: '{url}' — "
-                f"Tableau Cloud requires HTTPS",
-                severity=FindingSeverity.HIGH,
-                rule=f"{rule_base}.server_url",
-                field="tableau_server_url",
-                suggestion=url.replace("http://", "https://", 1),
-            )
-        elif not url.startswith("https://"):
-            report.add_finding(
-                "project_config.csv",
-                f"tableau_server_url should start with https://: '{url}'",
-                severity=FindingSeverity.HIGH,
-                rule=f"{rule_base}.server_url",
-                field="tableau_server_url",
-                suggestion=f"https://{url}",
-            )
-
-        # connections: class values
-        valid_classes = {"snowflake", "postgres", "mysql", "excel-direct",
-                         "redshift", "bigquery", "sqlserver", "oracle"}
-        for conn in spec.connections:
-            cls = conn.class_.lower()
-            if cls not in valid_classes:
-                report.add_finding(
-                    "connections.csv",
-                    f"Connection '{conn.connection_id}' has unknown class '{conn.class_}'",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.connection_class",
-                    field="class",
-                    value=conn.class_,
-                    suggestion=f"Use one of: {sorted(valid_classes)}",
-                )
-
-        # columns: datatype values
-        for col in spec.columns:
-            if col.datatype not in VALID_DATATYPES:
-                report.add_critical(
-                    "columns.csv",
-                    f"Column '{col.column_id}' has invalid datatype '{col.datatype}'",
-                    rule=f"{rule_base}.column_datatype",
-                    field="datatype",
-                    value=col.datatype,
-                    suggestion=f"Use one of: {sorted(VALID_DATATYPES)}",
-                )
-
-        # columns: role values
-        for col in spec.columns:
-            if col.role not in VALID_ROLES:
-                report.add_critical(
-                    "columns.csv",
-                    f"Column '{col.column_id}' has invalid role '{col.role}'",
-                    rule=f"{rule_base}.column_role",
-                    field="role",
-                    value=col.role,
-                )
-
-        # dashboard_requirements: chart_type values (worksheets only)
-        for req in spec.get_worksheets():
-            if req.chart_type and req.chart_type not in VALID_CHART_TYPES:
-                report.add_finding(
-                    "dashboard_requirements.csv",
-                    f"Worksheet '{req.view_id}' has unknown chart_type '{req.chart_type}'",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.chart_type",
-                    field="chart_type",
-                    value=req.chart_type,
-                    suggestion=f"Use one of: {sorted(VALID_CHART_TYPES)}",
-                )
-
-        # dashboard_requirements: sort_direction
-        for req in spec.dashboard_requirements:
-            if req.sort_direction and req.sort_direction.lower() not in {"asc", "desc"}:
-                report.add_warning(
-                    "dashboard_requirements.csv",
-                    f"View '{req.view_id}' has invalid sort_direction '{req.sort_direction}'",
-                    rule=f"{rule_base}.sort_direction",
-                    field="sort_direction",
-                )
-
-        # metrics: datatype
-        for m in spec.metrics:
-            if m.datatype not in VALID_DATATYPES:
-                report.add_critical(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' has invalid datatype '{m.datatype}'",
-                    rule=f"{rule_base}.metric_datatype",
-                    field="datatype",
-                    value=m.datatype,
-                )
-
-    # ══════════════════════════════════════════════════════════════════════
-    # CAT-2: Completeness checks
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _cat2_completeness_checks(
-        self, spec: ProjectSpec, report: ValidationReport
-    ) -> None:
-        """Ensure required fields are populated for each entity."""
-        rule_base = "CAT2"
-        report.rules_run.append(rule_base)
-
-        # Worksheets must have at least rows OR columns populated
-        for req in spec.get_worksheets():
-            if not req.row_fields and not req.column_fields:
-                report.add_finding(
-                    "dashboard_requirements.csv",
-                    f"Worksheet '{req.view_id}' ({req.view_name}) has no rows or columns "
-                    f"defined — it will render as an empty view",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.worksheet_shelves",
-                    field="rows/columns",
-                    suggestion="Populate at least one of: rows, columns",
-                )
-
-        # Worksheets must have chart_type
-        for req in spec.get_worksheets():
-            if not req.chart_type:
-                report.add_finding(
-                    "dashboard_requirements.csv",
-                    f"Worksheet '{req.view_id}' ({req.view_name}) has no chart_type",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.worksheet_chart_type",
-                    field="chart_type",
-                    suggestion=f"Set chart_type to one of: {sorted(VALID_CHART_TYPES)}",
-                )
-
-        # Dashboards must have views_in_dashboard
-        for dash in spec.get_dashboards():
-            if not dash.dashboard_view_ids:
-                report.add_finding(
-                    "dashboard_requirements.csv",
-                    f"Dashboard '{dash.view_id}' ({dash.view_name}) has no worksheets "
-                    f"assigned in views_in_dashboard",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.dashboard_views",
-                    field="views_in_dashboard",
-                    suggestion="List worksheet view_ids separated by | in views_in_dashboard",
-                )
-
-        # Pie charts require color encoding
-        for req in spec.get_worksheets():
-            if req.chart_type == "Pie" and not req.color:
-                report.add_warning(
-                    "dashboard_requirements.csv",
-                    f"Pie chart '{req.view_id}' has no color encoding — "
-                    f"Tableau requires color for Pie mark type",
-                    rule=f"{rule_base}.pie_color",
-                    field="color",
-                )
-
-        # Connections must have warehouse set for Snowflake
-        for conn in spec.connections:
-            if conn.class_.lower() == "snowflake" and not conn.warehouse:
-                report.add_finding(
-                    "connections.csv",
-                    f"Snowflake connection '{conn.connection_id}' has no warehouse specified",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.snowflake_warehouse",
-                    field="warehouse",
-                    suggestion="Set warehouse to your Snowflake virtual warehouse name",
-                )
-
-        # Published datasources must have published_ds_name
-        for ds in spec.data_sources:
-            if ds.datasource_type == "published" and not ds.published_ds_name:
-                report.add_critical(
-                    "data_sources.csv",
-                    f"Published datasource '{ds.datasource_id}' has no published_ds_name",
-                    rule=f"{rule_base}.published_ds_name",
-                    field="published_ds_name",
-                    suggestion="Set published_ds_name to the Tableau Cloud datasource name",
-                )
-
-        # Auth records must have username_env and password_env set
-        for auth in spec.auth_configs:
-            if not auth.username_env:
-                report.add_critical(
-                    "auth.csv",
-                    f"Auth record '{auth.auth_id}' has no username_env",
-                    rule=f"{rule_base}.auth_username_env",
-                    field="username_env",
-                )
-            if not auth.password_env:
-                report.add_critical(
-                    "auth.csv",
-                    f"Auth record '{auth.auth_id}' has no password_env",
-                    rule=f"{rule_base}.auth_password_env",
-                    field="password_env",
-                )
-
-    # ══════════════════════════════════════════════════════════════════════
-    # CAT-3: Business rules (Tableau-specific)
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _cat3_business_rules(
-        self, spec: ProjectSpec, report: ValidationReport
-    ) -> None:
-        """Tableau-specific constraint validation."""
-        rule_base = "CAT3"
-        report.rules_run.append(rule_base)
-
-        for m in spec.metrics:
-            self._validate_metric_formula(m, report, rule_base)
-
-        # LOD metrics: flag the is_lod marker is consistent with formula content
-        for m in spec.metrics:
-            has_lod_syntax = bool(re.search(r'\{\s*(FIXED|INCLUDE|EXCLUDE)', m.formula,
-                                             re.IGNORECASE))
-            if m.is_lod and not has_lod_syntax:
-                report.add_warning(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' is marked is_lod=true but formula "
-                    f"has no LOD syntax (FIXED/INCLUDE/EXCLUDE): {m.formula}",
-                    rule=f"{rule_base}.lod_marker_consistency",
-                    field="is_lod",
-                )
-            if not m.is_lod and has_lod_syntax:
-                report.add_warning(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' has LOD syntax but is_lod=false: {m.formula}",
-                    rule=f"{rule_base}.lod_marker_consistency",
-                    field="is_lod",
-                )
-
-        # Dashboard dimensions: validate height and width are positive
-        for dash in spec.get_dashboards():
-            if dash.width_px <= 0:
-                report.add_finding(
-                    "dashboard_requirements.csv",
-                    f"Dashboard '{dash.view_id}' has invalid width_px={dash.width_px}",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.dashboard_dimensions",
-                    field="width_px",
-                )
-            if dash.height_px <= 0:
-                report.add_finding(
-                    "dashboard_requirements.csv",
-                    f"Dashboard '{dash.view_id}' has invalid height_px={dash.height_px}",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.dashboard_dimensions",
-                    field="height_px",
-                )
-
-        # Tableau version must be a known value
-        version = spec.project_config.tableau_version
-        if version not in {"18.1", "18.0", "17.4", "17.3"}:
-            report.add_warning(
-                "project_config.csv",
-                f"tableau_version '{version}' is not a recognized schema version. "
-                f"Recommended: 18.1",
-                rule=f"{rule_base}.tableau_version",
-                field="tableau_version",
-            )
-
-        # Workbook name should not contain spaces (Tableau Cloud may reject)
-        name = spec.project_config.workbook_name
-        if " " in name:
-            report.add_warning(
-                "project_config.csv",
-                f"workbook_name '{name}' contains spaces — use underscores for "
-                f"Tableau Cloud compatibility",
-                rule=f"{rule_base}.workbook_name_spaces",
-                field="workbook_name",
-                suggestion=name.replace(" ", "_"),
-            )
-
-        # Dimension columns should not have aggregation set
-        for col in spec.columns:
-            if col.role == "dimension" and col.aggregation:
-                report.add_warning(
-                    "columns.csv",
-                    f"Column '{col.column_id}' is a dimension but has aggregation "
-                    f"'{col.aggregation}' — dimensions are not aggregated in Tableau",
-                    rule=f"{rule_base}.dimension_aggregation",
-                    field="aggregation",
-                )
-
-    def _validate_metric_formula(
+    def _emit_completeness_hints(
         self,
-        m: MetricConfig,
+        dataframes: Dict[str, pd.DataFrame],
         report: ValidationReport,
-        rule_base: str,
     ) -> None:
-        """Validate a single metric formula for common Tableau syntax issues."""
-        formula = m.formula.strip()
+        # Metrics file absent
+        if "metrics.csv" not in dataframes:
+            report.issues.append(ValidationIssue(
+                severity=Severity.INFO,
+                rule="completeness_hint",
+                file="metrics.csv",
+                column=None,
+                row_index=None,
+                message="No metrics.csv found. Workbook will contain no calculated fields.",
+            ))
+        # Figma layout absent
+        if "figma_layout.csv" not in dataframes:
+            report.issues.append(ValidationIssue(
+                severity=Severity.INFO,
+                rule="completeness_hint",
+                file="figma_layout.csv",
+                column=None,
+                row_index=None,
+                message=(
+                    "No figma_layout.csv found. Dashboard layout will use default "
+                    "grid-2x2 template."
+                ),
+            ))
+        # Warn if only one datasource but multiple connection classes
+        conn_df = dataframes.get("connections.csv")
+        if conn_df is not None and "class" in conn_df.columns:
+            classes = conn_df["class"].str.strip().str.lower().unique()
+            if len(classes) > 1:
+                report.issues.append(ValidationIssue(
+                    severity=Severity.INFO,
+                    rule="completeness_hint",
+                    file="connections.csv",
+                    column="class",
+                    row_index=None,
+                    message=(
+                        f"Multiple connection classes detected: {list(classes)}. "
+                        "Verify each connection has correct credentials in auth.csv."
+                    ),
+                ))
 
-        # Empty formula (already caught by intake, but double-check)
-        if not formula:
-            report.add_critical(
-                "metrics.csv",
-                f"Metric '{m.metric_id}' ({m.metric_name}) has empty formula",
-                rule=f"{rule_base}.formula_empty",
-                field="formula",
-            )
-            return
 
-        # Check bracket balance: [ must match ]
-        if formula.count("[") != formula.count("]"):
-            report.add_critical(
-                "metrics.csv",
-                f"Metric '{m.metric_id}' formula has unbalanced brackets: {formula}",
-                rule=f"{rule_base}.formula_brackets",
-                field="formula",
-                value=formula,
-                suggestion="Ensure every [ has a matching ]",
-            )
-
-        # Check paren balance
-        if formula.count("(") != formula.count(")"):
-            report.add_critical(
-                "metrics.csv",
-                f"Metric '{m.metric_id}' formula has unbalanced parentheses: {formula}",
-                rule=f"{rule_base}.formula_parens",
-                field="formula",
-                value=formula,
-            )
-
-        # LOD: must have colon between scope and expression
-        if re.search(r'\{\s*(FIXED|INCLUDE|EXCLUDE)', formula, re.IGNORECASE):
-            if ":" not in formula:
-                report.add_critical(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' LOD expression missing ':' separator: {formula}",
-                    rule=f"{rule_base}.lod_colon",
-                    field="formula",
-                    suggestion="Format: { FIXED [Dim] : SUM([Measure]) }",
-                )
-            # LOD must have closing brace
-            if formula.count("{") != formula.count("}"):
-                report.add_critical(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' LOD expression has unbalanced braces: {formula}",
-                    rule=f"{rule_base}.lod_braces",
-                    field="formula",
-                )
-
-        # Division by zero risk: SUM([X]) / SUM([Y]) — warn if no NULLIF/ZN
-        if "/" in formula and not re.search(r'nullif|zn\s*\(', formula, re.IGNORECASE):
-            report.add_info(
-                "metrics.csv",
-                f"Metric '{m.metric_id}' uses division — consider wrapping denominator "
-                f"with ZN() or NULLIF() to handle division by zero: {formula}",
-                rule=f"{rule_base}.division_by_zero",
-            )
-
-    # ══════════════════════════════════════════════════════════════════════
-    # CAT-4: Cross-file consistency
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _cat4_cross_file_consistency(
-        self, spec: ProjectSpec, report: ValidationReport
-    ) -> None:
-        """Check consistency between related entities across CSV files."""
-        rule_base = "CAT4"
-        report.rules_run.append(rule_base)
-
-        # Relationship left_key and right_key must exist in their respective tables
-        all_column_names_by_table: Dict[str, set] = {}
-        for col in spec.columns:
-            all_column_names_by_table.setdefault(col.table_id, set()).add(
-                col.column_name.upper()
-            )
-
-        for rel in spec.relationships:
-            left_cols  = all_column_names_by_table.get(rel.left_table_id,  set())
-            right_cols = all_column_names_by_table.get(rel.right_table_id, set())
-
-            if left_cols and rel.left_key.upper() not in left_cols:
-                report.add_finding(
-                    "relationships.csv",
-                    f"Relationship '{rel.relationship_id}': left_key '{rel.left_key}' "
-                    f"not found in table '{rel.left_table_id}' columns",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.join_key_exists",
-                    field="left_key",
-                    value=rel.left_key,
-                    suggestion=f"Available columns: {sorted(left_cols)}",
-                )
-            if right_cols and rel.right_key.upper() not in right_cols:
-                report.add_finding(
-                    "relationships.csv",
-                    f"Relationship '{rel.relationship_id}': right_key '{rel.right_key}' "
-                    f"not found in table '{rel.right_table_id}' columns",
-                    severity=FindingSeverity.HIGH,
-                    rule=f"{rule_base}.join_key_exists",
-                    field="right_key",
-                    value=rel.right_key,
-                    suggestion=f"Available columns: {sorted(right_cols)}",
-                )
-
-        # Dimension column_ids must all exist in columns.csv
-        all_column_ids = {c.column_id for c in spec.columns}
-        for dim in spec.dimensions:
-            for cid in dim.column_ids:
-                if cid not in all_column_ids:
-                    report.add_finding(
-                        "dimensions.csv",
-                        f"Dimension '{dim.dimension_id}' references unknown column_id "
-                        f"'{cid}' in columns field",
-                        severity=FindingSeverity.HIGH,
-                        rule=f"{rule_base}.dimension_column_ids",
-                        field="columns",
-                        value=cid,
-                    )
-
-        # Metric field references: [FieldName] in formula should exist in columns
-        # (best-effort — we check for names wrapped in [] that look like column refs)
-        col_names_upper = {c.column_name.upper() for c in spec.columns}
-        metric_names_upper = {m.metric_name.upper() for m in spec.metrics}
-
-        for m in spec.metrics:
-            refs = re.findall(r'\[([^\]]+)\]', m.formula)
-            for ref in refs:
-                ref_upper = ref.strip().upper()
-                # Skip date parts and functions (e.g. [MONTH], [Order Date])
-                if ref_upper in col_names_upper or ref_upper in metric_names_upper:
-                    continue
-                # Skip known Tableau keywords used as field references
-                skip = {"MONTH", "YEAR", "QUARTER", "WEEK", "DAY",
-                        "DATEPART", "TODAY", "NOW"}
-                if ref_upper in skip:
-                    continue
-                report.add_info(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' references '[{ref}]' — "
-                    f"not found in columns.csv. Verify this field exists in the datasource.",
-                    rule=f"{rule_base}.metric_field_refs",
-                )
-
-        # Dashboard layout template consistency
-        for dash in spec.get_dashboards():
-            if dash.dashboard_layout and dash.dashboard_layout not in VALID_LAYOUTS:
-                report.add_warning(
-                    "dashboard_requirements.csv",
-                    f"Dashboard '{dash.view_id}' uses unknown layout "
-                    f"'{dash.dashboard_layout}'",
-                    rule=f"{rule_base}.dashboard_layout",
-                    field="dashboard_layout",
-                )
-
-    # ══════════════════════════════════════════════════════════════════════
-    # CAT-5: Performance warnings
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _cat5_performance_warnings(
-        self, spec: ProjectSpec, report: ValidationReport
-    ) -> None:
-        """Flag configurations that may cause performance issues."""
-        rule_base = "CAT5"
-        report.rules_run.append(rule_base)
-
-        # Column count per datasource
-        for ds in spec.data_sources:
-            cols = sum(
-                len(spec.get_columns_for_table(t.table_id))
-                for t in spec.get_tables_for_datasource(ds.datasource_id)
-            )
-            if cols > MAX_COLUMNS_PER_DATASOURCE:
-                report.add_warning(
-                    "columns.csv",
-                    f"Datasource '{ds.datasource_id}' has {cols} columns — "
-                    f"consider hiding unused columns to improve performance "
-                    f"(threshold: {MAX_COLUMNS_PER_DATASOURCE})",
-                    rule=f"{rule_base}.column_count",
-                )
-
-        # Metric count per datasource
-        for ds in spec.data_sources:
-            m_count = len(spec.get_metrics_for_datasource(ds.datasource_id))
-            if m_count > MAX_METRICS_PER_DATASOURCE:
-                report.add_warning(
-                    "metrics.csv",
-                    f"Datasource '{ds.datasource_id}' has {m_count} calculated fields — "
-                    f"many calculated fields can slow query performance "
-                    f"(threshold: {MAX_METRICS_PER_DATASOURCE})",
-                    rule=f"{rule_base}.metric_count",
-                )
-
-        # Worksheets per dashboard
-        for dash in spec.get_dashboards():
-            ws_count = len(dash.dashboard_view_ids)
-            if ws_count > MAX_WORKSHEETS_PER_DASHBOARD:
-                report.add_warning(
-                    "dashboard_requirements.csv",
-                    f"Dashboard '{dash.view_id}' has {ws_count} worksheets — "
-                    f"dashboards with many sheets may load slowly "
-                    f"(threshold: {MAX_WORKSHEETS_PER_DASHBOARD})",
-                    rule=f"{rule_base}.worksheets_per_dashboard",
-                )
-
-        # Nested LOD expressions (LOD within LOD) — high performance cost
-        for m in spec.metrics:
-            lod_matches = re.findall(
-                r'\{\s*(FIXED|INCLUDE|EXCLUDE)', m.formula, re.IGNORECASE
-            )
-            if len(lod_matches) > 1:
-                report.add_warning(
-                    "metrics.csv",
-                    f"Metric '{m.metric_id}' ({m.metric_name}) contains {len(lod_matches)} "
-                    f"LOD expressions — nested LODs can significantly impact query performance",
-                    rule=f"{rule_base}.nested_lod",
-                )
-
-        # Multiple full-outer joins (expensive)
-        full_joins = [r for r in spec.relationships
-                      if r.join_type.lower() == "full"]
-        if len(full_joins) > 2:
-            report.add_warning(
-                "relationships.csv",
-                f"{len(full_joins)} FULL OUTER JOINs detected — full outer joins "
-                f"are expensive; verify each is necessary",
-                rule=f"{rule_base}.full_outer_joins",
-            )
-
-    # ══════════════════════════════════════════════════════════════════════
-    # CAT-6: Security checks
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _cat6_security_checks(
-        self, spec: ProjectSpec, report: ValidationReport
-    ) -> None:
-        """Validate credential references and flag security concerns."""
-        rule_base = "CAT6"
-        report.rules_run.append(rule_base)
-
-        # Check that env vars referenced in auth.csv are actually set
-        for auth in spec.auth_configs:
-            for env_var_name, field_name in [
-                (auth.username_env,    "username_env"),
-                (auth.password_env,    "password_env"),
-                (auth.pat_name_env,    "pat_name_env"),
-                (auth.pat_secret_env,  "pat_secret_env"),
-                (auth.oauth_token_env, "oauth_token_env"),
-            ]:
-                if env_var_name and env_var_name.strip():
-                    val = os.environ.get(env_var_name.strip(), "")
-                    if not val:
-                        report.add_warning(
-                            "auth.csv",
-                            f"Auth '{auth.auth_id}': env var '{env_var_name}' "
-                            f"({field_name}) is not set in the environment",
-                            rule=f"{rule_base}.env_var_not_set",
-                            field=field_name,
-                        )
-
-        # Check Tableau PAT env vars if they're referenced in any auth record
-        tab_pat_records = [a for a in spec.auth_configs
-                           if a.pat_name_env or a.pat_secret_env]
-        if tab_pat_records:
-            for auth in tab_pat_records:
-                if auth.pat_name_env and not os.environ.get(auth.pat_name_env, ""):
-                    report.add_warning(
-                        "auth.csv",
-                        f"Tableau PAT name env var '{auth.pat_name_env}' not set — "
-                        f"Tableau Cloud publishing will fail",
-                        rule=f"{rule_base}.tableau_pat_not_set",
-                        field="pat_name_env",
-                    )
-                if auth.pat_secret_env and not os.environ.get(auth.pat_secret_env, ""):
-                    report.add_warning(
-                        "auth.csv",
-                        f"Tableau PAT secret env var '{auth.pat_secret_env}' not set — "
-                        f"Tableau Cloud publishing will fail",
-                        rule=f"{rule_base}.tableau_pat_not_set",
-                        field="pat_secret_env",
-                    )
-
-        # Warn if any connection uses username/password but no auth record has password_env
-        for conn in spec.connections:
-            if conn.auth_method == "Username Password":
-                auth = next(
-                    (a for a in spec.auth_configs if a.auth_id == conn.auth_id), None
-                )
-                if auth and not auth.password_env:
-                    report.add_finding(
-                        "auth.csv",
-                        f"Connection '{conn.connection_id}' uses Username Password auth "
-                        f"but auth record '{conn.auth_id}' has no password_env",
-                        severity=FindingSeverity.HIGH,
-                        rule=f"{rule_base}.password_env_required",
-                        field="password_env",
-                    )
-
-        # Info: remind about credential rotation
-        report.add_info(
-            "auth.csv",
-            "Security reminder: Tableau PAT tokens should be rotated every 90 days. "
-            "Snowflake service account passwords should follow your org's rotation policy.",
-            rule=f"{rule_base}.credential_rotation_reminder",
-        )
+# ---------------------------------------------------------------------------
+# Public export alias (matches cli.py import pattern)
+# ---------------------------------------------------------------------------
+ValidationAgent = MetadataValidationAgent
