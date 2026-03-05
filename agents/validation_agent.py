@@ -594,8 +594,12 @@ class MetadataValidationAgent(BaseAgent):
     PHASE = "VALIDATING"
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+        # Pass config to BaseAgent per the standard interface contract.
+        # Also cache csv_dir directly on the instance — some BaseAgent builds
+        # use self.config as a live-config store that may not mirror the
+        # constructor dict verbatim; caching ensures reliable access.
         super().__init__(self.AGENT_ID, config or {})
-        self._csv_dir: Optional[Path] = None
+        self._default_csv_dir: Optional[str] = (config or {}).get("csv_dir")
 
     # ── BaseAgent contract ─────────────────────────────────────────────────
 
@@ -604,14 +608,14 @@ class MetadataValidationAgent(BaseAgent):
         project_spec = state.get("project_spec")
         if not project_spec:
             errors.append("'project_spec' is missing from workflow state.")
-        csv_dir = state.get("csv_dir") or self.config.get("csv_dir")
+        csv_dir = state.get("csv_dir") or self._default_csv_dir
         if not csv_dir:
             errors.append("'csv_dir' must be present in state or agent config.")
         return errors
 
     def run(self, state: Dict[str, Any]) -> AgentResult:
         start = time.monotonic()
-        self.log_start(self.PHASE)
+        self.log_start()
 
         pre_errors = self.validate_input(state)
         if pre_errors:
@@ -625,7 +629,7 @@ class MetadataValidationAgent(BaseAgent):
             self.log_complete(result)
             return result
 
-        csv_dir = Path(state.get("csv_dir") or self.config.get("csv_dir", "csv_inputs"))
+        csv_dir = Path(state.get("csv_dir") or self._default_csv_dir or "csv_inputs")
         project_spec = state.get("project_spec", {})
         project_id = project_spec.get("project_id", "unknown")
 
