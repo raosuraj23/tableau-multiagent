@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import structlog
 
-from agents.base_agent import AgentResult, BaseAgent
+from agents.base_agent import AgentResult, AgentStatus, BaseAgent
 
 logger = structlog.get_logger()
 
@@ -594,11 +594,10 @@ class MetadataValidationAgent(BaseAgent):
     PHASE = "VALIDATING"
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        # Pass config to BaseAgent per the standard interface contract.
-        # Also cache csv_dir directly on the instance — some BaseAgent builds
-        # use self.config as a live-config store that may not mirror the
-        # constructor dict verbatim; caching ensures reliable access.
-        super().__init__(self.AGENT_ID, config or {})
+        # BaseAgent.__init__(self, agent_id: str, phase: str)
+        # Second positional arg is the PHASE string — NOT the config dict.
+        super().__init__(self.AGENT_ID, self.PHASE)
+        # Cache csv_dir from caller config for validate_input / run
         self._default_csv_dir: Optional[str] = (config or {}).get("csv_dir")
 
     # ── BaseAgent contract ─────────────────────────────────────────────────
@@ -622,7 +621,7 @@ class MetadataValidationAgent(BaseAgent):
             result = AgentResult(
                 agent_id=self.AGENT_ID,
                 phase=self.PHASE,
-                status="failed",
+                status=AgentStatus.FAILED,
                 errors=pre_errors,
                 duration_ms=(time.monotonic() - start) * 1000,
             )
@@ -636,7 +635,7 @@ class MetadataValidationAgent(BaseAgent):
         report = self._run_validation(csv_dir, project_id)
         report.duration_ms = (time.monotonic() - start) * 1000
 
-        status = "success" if report.is_valid else "failed"
+        status = AgentStatus.SUCCESS if report.is_valid else AgentStatus.FAILED
         result = AgentResult(
             agent_id=self.AGENT_ID,
             phase=self.PHASE,
@@ -657,7 +656,7 @@ class MetadataValidationAgent(BaseAgent):
         return {
             "validation_report": result.output.get("validation_report", {}),
             "errors": result.errors,
-            "phase": self.PHASE if result.status == "success" else "FAILED",
+            "phase": self.PHASE if result.status == AgentStatus.SUCCESS else "FAILED",
         }
 
     # ── Internal validation pipeline ──────────────────────────────────────
